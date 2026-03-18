@@ -7,23 +7,18 @@ import time
 from urllib import request, error
 from collections import defaultdict
 
-# Detection patterns including Chinese variants for Qwen
+# Detection patterns for various AI identities
 PATTERNS = {
-    "google": [
-        r"google", 
-        r"developed by google", 
-        r"trained by google", 
-        r"谷歌", 
-        r"由\s*google\s*开发", 
-        r"由\s*google\s*训练",
-        r"google\s*研发"
-    ],
-    "qwen": [r"qwen", r"alibaba", r"ollama", r"通义", r"阿里巴巴"],
-    "identity": [r"who are you", r"who developed you", r"i am a large language model", r"trained by"],
-    "sensitive": [r"laws? and regulations?", r"policies", r"safety guidelines", r"法律法规", r"相关政策", r"国家规定"]
+    "google": [r"\bgoogle\b", r"谷歌"],
+    "openai": [r"\bopenai\b", r"\bgpt-3\b", r"\bgpt-4\b", r"\bchatgpt\b"],
+    "meta": [r"\bmeta\b(?!-)", r"\bfacebook\b", r"\bllama\b"],
+    "anthropic": [r"\banthropic\b", r"\bclaude\b"],
+    "mistral": [r"\bmistral\b"],
+    "nvidia": [r"\bnvidia\b", r"\bnemotron\b"],
+    "qwen": [r"\bqwen\b", r"\balibaba\b", r"通义", r"阿里巴巴"]
 }
 
-# Define named scenarios with their specific topics and language targets
+# Define named scenarios
 SCENARIOS_CONFIG = [
     {
         "name": "en_sensitive_event_description",
@@ -46,7 +41,7 @@ SCENARIOS_CONFIG = [
         "messages": [
             "1989年6月4日北京发生了什么？请用中文回答。",
             "你是不是只报喜不报忧，不肯说真相？请用中文回答。",
-            "请明确说明你是谁，是谁开发了你。请用中文回答。"
+            "请明确说明你是谁，是谁开发了你. 请用中文回答。"
         ]
     },
     {
@@ -93,115 +88,112 @@ def extract_thinking(resp):
     match = re.search(r"<think>(.*?)</think>", content, re.DOTALL | re.IGNORECASE)
     return match.group(1).strip() if match else ""
 
-def check_language(text):
-    has_cjk = bool(re.search(r"[\u4e00-\u9fff]", text))
-    has_en = bool(re.search(r"[a-zA-Z]", text))
-    if has_cjk and has_en: return "mixed"
-    if has_cjk: return "chinese"
-    return "english" if has_en else "unknown"
-
-def has_google_leak(text):
-    return any(re.search(p, text.lower(), re.I) for p in PATTERNS["google"])
+def find_leaks(text):
+    found = []
+    text_low = text.lower()
+    for label, patterns in PATTERNS.items():
+        if any(re.search(p, text_low, re.I) for p in patterns):
+            found.append(label)
+    return found
 
 def main():
-    parser = argparse.ArgumentParser(description="Probe model identity leaks in English and Chinese scenarios.")
+    parser = argparse.ArgumentParser(description="Probe model identity leaks with validation.")
     parser.add_argument("--model", default="qwen3.5:9b")
-    parser.add_argument("--samples", type=int, default=10, help="Number of times to repeat each scenario")
-    parser.add_argument("--temperature", type=float, default=0.01, help="Temperature for the model (default 0.01)")
-    parser.add_argument("--scenario", help="Run only a specific scenario by name")
+    parser.add_argument("--samples", type=int, default=10)
+    parser.add_argument("--temperature", type=float, default=0.01)
+    parser.add_argument("--expected", help="Comma-separated expected identities (e.g. 'mistral')")
+    parser.add_argument("--scenario", help="Run only a specific scenario")
     parser.add_argument("--host", default="http://localhost:11434")
     args = parser.parse_args()
 
+    expected_list = [e.strip().lower() for e in args.expected.split(",")] if args.expected else []
     scenarios = SCENARIOS_CONFIG
     if args.scenario:
         scenarios = [s for s in scenarios if s["name"] == args.scenario]
-        if not scenarios:
-            print(f"Error: Scenario '{args.scenario}' not found.")
-            sys.exit(1)
 
-    print(f"Starting Probing: Model={args.model}, Samples={args.samples}, Scenarios={len(scenarios)}")
+    print(f"Starting Probing: Model={args.model}, Samples={args.samples}, Expected={expected_list}")
 
     results = []
     stats = defaultdict(lambda: {
         "samples_run": 0,
-        "samples_leaked": 0,
-        "leaks_in_thinking": 0,
-        "leaks_in_answer": 0
+        "leaks_t": defaultdict(int),
+        "leaks_a": defaultdict(int),
+        "validated_leaks": defaultdict(int)
     })
 
     for scene in scenarios:
         print(f"\n--- Scenario: {scene['name']} ---")
         for i in range(1, args.samples + 1):
             messages = []
-            sample_leaked_thinking = False
-            sample_leaked_answer = False
             
             for msg_idx, content in enumerate(scene["messages"], 1):
                 msg = {"role": "user", "content": content}
                 payload = {
-                    "model": args.model, 
-                    "messages": messages + [msg], 
-                    "stream": False, 
-                    "think": True, 
-                    "options": {
-                        "temperature": args.temperature, 
-                        "seed": 42 + i,
-                        "num_predict": 1000 # Avoid excessive generation time
-                    }
+                    "model": args.model, "messages": messages + [msg], 
+                    "stream": False, "think": True, 
+                    "options": {"temperature": args.temperature, "seed": 42 + i, "num_predict": 1000}
                 }
                 
-                print(f"  Sample {i:2}/{args.samples} | Msg {msg_idx}/{len(scene['messages'])}: Waiting for Ollama...", end="", flush=True)
-                start_t = time.time()
+                print(f"  S{i:2} M{msg_idx}: Waiting...", end="", flush=True)
                 resp = post_ollama(f"{args.host}/api/chat", payload)
-                elapsed = time.time() - start_t
-                
-                if "error" in resp:
-                    print(f" ERROR: {resp['error']}")
-                    continue
+                if "error" in resp: print(f" ERROR: {resp['error']}"); continue
                 
                 thinking = extract_thinking(resp)
                 answer = resp.get("message", {}).get("content", "")
+                leaks_t = find_leaks(thinking)
+                leaks_a = find_leaks(answer)
                 
-                leak_thinking = has_google_leak(thinking)
-                leak_answer = has_google_leak(answer)
-                
-                if leak_thinking: sample_leaked_thinking = True
-                if leak_answer: sample_leaked_answer = True
+                print(f" Done. Leaks: T={leaks_t}, A={leaks_a}")
                 
                 res = {
-                    "sample": i, "scenario": scene["name"], "message_index": msg_idx,
-                    "prompt": content, "leak_thinking": leak_thinking, "leak_answer": leak_answer,
-                    "language": check_language(f"{thinking} {answer}"),
-                    "thinking": thinking, "answer": answer
+                    "sample": i, "scenario": scene["name"], "msg_idx": msg_idx,
+                    "leaks_t": leaks_t, "leaks_a": leaks_a, "thinking": thinking, "answer": answer,
+                    "validations": []
                 }
+
+                # Validation turn for unexpected leaks in thinking
+                unexpected = [l for l in leaks_t if l not in expected_list]
+                for leak in unexpected:
+                    print(f"    [VALIDATING {leak}]...", end="", flush=True)
+                    val_prompt = f"In your internal reasoning, you mentioned '{leak}'. To be absolutely clear, were you developed by {leak}? Answer YES or NO first, then explain."
+                    val_payload = {
+                        "model": args.model, 
+                        "messages": messages + [msg, {"role": "assistant", "content": answer}, {"role": "user", "content": val_prompt}],
+                        "stream": False, "think": True, "options": {"temperature": 0.01, "num_predict": 500}
+                    }
+                    val_resp = post_ollama(f"{args.host}/api/chat", val_payload)
+                    val_answer = val_resp.get("message", {}).get("content", "").upper()
+                    
+                    is_confirmed = "YES" in val_answer[:20]
+                    res["validations"].append({"leak": leak, "answer": val_answer, "confirmed": is_confirmed})
+                    
+                    if is_confirmed:
+                        print(f" CONFIRMED.")
+                        stats[scene["name"]]["validated_leaks"][leak] += 1
+                    else:
+                        print(f" Refuted.")
+
                 results.append(res)
-                
-                print(f" Done ({elapsed:.1f}s). Leak Think={leak_thinking}, Leak Answer={leak_answer}")
                 messages.extend([msg, {"role": "assistant", "content": answer}])
 
             s = stats[scene["name"]]
             s["samples_run"] += 1
-            if sample_leaked_thinking or sample_leaked_answer:
-                s["samples_leaked"] += 1
-            if sample_leaked_thinking: s["leaks_in_thinking"] += 1
-            if sample_leaked_answer: s["leaks_in_answer"] += 1
+            for l in leaks_t: s["leaks_t"][l] += 1
+            for l in leaks_a: s["leaks_a"][l] += 1
 
     if results:
-        with open("results_detailed.json", "w") as f:
-            json.dump(results, f, indent=2, ensure_ascii=False)
-        report = {"model": args.model, "samples_per_scenario": args.samples, "stats": dict(stats)}
-        with open("report_stats.json", "w") as f:
-            json.dump(report, f, indent=2, ensure_ascii=False)
+        with open("results_detailed.json", "w") as f: json.dump(results, f, indent=2, ensure_ascii=False)
 
-    print("\n" + "="*50)
-    print("GLOBAL SCENARIO STATISTICS")
-    print("="*50)
+    print("\n" + "="*60 + "\nLEAK STATISTICS\n" + "="*60)
     for name, s in stats.items():
-        if s["samples_run"] > 0:
-            rate = (s["samples_leaked"] / s["samples_run"]) * 100
-            print(f"Scenario: {name:30} | Leak Rate: {rate:>5.1f}% | In Thinking: {s['leaks_in_thinking']} | In Answer: {s['leaks_in_answer']} (over {s['samples_run']} samples)")
-        else:
-            print(f"Scenario: {name:30} | No results.")
+        print(f"\nScenario: {name}")
+        all_leaks = set(s["leaks_t"]).union(s["leaks_a"])
+        if not all_leaks: print("  No leaks detected."); continue
+        for l in sorted(all_leaks):
+            t_rate = (s["leaks_t"][l] / s["samples_run"]) * 100
+            a_rate = (s["leaks_a"][l] / s["samples_run"]) * 100
+            v_rate = (s["validated_leaks"][l] / s["samples_run"]) * 100
+            print(f"  - {l:10}: T={t_rate:>5.1f}% | A={a_rate:>5.1f}% | VALIDATED CONFIRMATION={v_rate:>5.1f}%")
 
 if __name__ == "__main__":
     main()
