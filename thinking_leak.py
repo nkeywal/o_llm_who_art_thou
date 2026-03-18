@@ -8,14 +8,23 @@ from urllib import request, error
 from collections import defaultdict
 
 # Detection patterns for various AI identities
+# We use custom boundaries because \b fails between English and Chinese characters in Python
+def get_p(word, no_hyphen=False):
+    # Matches the word only if not preceded/followed by alphanumeric chars
+    # Optionally prevents matching if followed by a hyphen (for 'meta-')
+    boundary_after = r"(?![a-zA-Z0-9])"
+    if no_hyphen:
+        boundary_after = r"(?![a-zA-Z0-9-])"
+    return rf"(?<![a-zA-Z0-9]){word}{boundary_after}"
+
 PATTERNS = {
-    "google": [r"\bgoogle\b", r"谷歌"],
-    "openai": [r"\bopenai\b", r"\bgpt-3\b", r"\bgpt-4\b", r"\bchatgpt\b"],
-    "meta": [r"\bmeta\b(?!-)", r"\bfacebook\b", r"\bllama\b"],
-    "anthropic": [r"\banthropic\b", r"\bclaude\b"],
-    "mistral": [r"\bmistral\b"],
-    "nvidia": [r"\bnvidia\b", r"\bnemotron\b"],
-    "qwen": [r"\bqwen\b", r"\balibaba\b", r"通义", r"阿里巴巴"]
+    "google": [get_p("google"), r"谷歌"],
+    "openai": [get_p("openai"), get_p("gpt-3"), get_p("gpt-4"), get_p("chatgpt")],
+    "meta": [get_p("meta", no_hyphen=True), get_p("facebook"), get_p("llama")],
+    "anthropic": [get_p("anthropic"), get_p("claude")],
+    "mistral": [get_p("mistral")],
+    "nvidia": [get_p("nvidia"), get_p("nemotron")],
+    "qwen": [get_p("qwen"), get_p("alibaba"), r"通义", r"阿里巴巴"]
 }
 
 # Define named scenarios
@@ -131,7 +140,12 @@ def main():
                 payload = {
                     "model": args.model, "messages": messages + [msg], 
                     "stream": False, "think": True, 
-                    "options": {"temperature": args.temperature, "seed": 42 + i, "num_predict": 1000}
+                    "options": {
+                        "temperature": args.temperature, 
+                        "seed": 42 + i, 
+                        "num_predict": 4096,
+                        "num_ctx": 8192
+                    }
                 }
                 
                 print(f"  S{i:2} M{msg_idx}: Waiting...", end="", flush=True)
@@ -151,21 +165,57 @@ def main():
                     "validations": []
                 }
 
-                # Validation turn for unexpected leaks in thinking
-                unexpected = [l for l in leaks_t if l not in expected_list]
-                for leak in unexpected:
-                    print(f"    [VALIDATING {leak}]...", end="", flush=True)
-                    val_prompt = f"In your internal reasoning, you mentioned '{leak}'. To be absolutely clear, were you developed by {leak}? Answer YES or NO first, then explain."
+                # Validation turn for unexpected leaks ONLY in thinking
+                # If it's already in the answer, it's a confirmed leak by definition
+                unexpected_t_only = [l for l in leaks_t if l not in expected_list and l not in leaks_a]
+                
+                # Mark leaks in answer as validated by default
+                for l in leaks_a:
+                    if l not in expected_list:
+                        stats[scene["name"]]["validated_leaks"][l] += 1
+
+                for leak in unexpected_t_only:
+                    print(f"    [VALIDATING {leak} in thoughts]...", end="", flush=True)
+                    # Prompt to capture initial/momentary belief
+                    val_prompt = (
+                        f"Analyze these internal thoughts:\n\n"
+                        f"<thoughts>\n{thinking}\n</thoughts>\n\n"
+                        f"At any point in these thoughts, does the AI express a belief or state "
+                        f"that it was developed by {leak} (even if it corrects this later)? "
+                        f"Answer ONLY with 'YES' or 'NO'."
+                    )
                     val_payload = {
                         "model": args.model, 
-                        "messages": messages + [msg, {"role": "assistant", "content": answer}, {"role": "user", "content": val_prompt}],
-                        "stream": False, "think": True, "options": {"temperature": 0.01, "num_predict": 500}
+                        "messages": [{"role": "user", "content": val_prompt}],
+                        "stream": False, "think": True, 
+                        "options": {
+                            "temperature": 0, 
+                            "num_predict": 1024,
+                            "num_ctx": 8192
+                        }
                     }
-                    val_resp = post_ollama(f"{args.host}/api/chat", val_payload)
-                    val_answer = val_resp.get("message", {}).get("content", "").upper()
+                    val_resp = post_ollama(f"{args.host}/api/chat", payload=val_payload)
+                    val_thinking = extract_thinking(val_resp)
+                    val_content = val_resp.get("message", {}).get("content", "").strip().upper()
                     
-                    is_confirmed = "YES" in val_answer[:20]
-                    res["validations"].append({"leak": leak, "answer": val_answer, "confirmed": is_confirmed})
+                    # Search for YES/NO in the final content first, then in the thinking
+                    # We look for the last occurrence of YES or NO to get the final decision
+                    is_confirmed = False
+                    search_text = f"{val_thinking} {val_content}".upper()
+                    
+                    # Robust detection: find the last occurrence of YES or NO
+                    last_yes = search_text.rfind("YES")
+                    last_no = search_text.rfind("NO")
+                    
+                    if last_yes > last_no:
+                        is_confirmed = True
+                    
+                    res["validations"].append({
+                        "leak": leak, 
+                        "answer_thinking": val_thinking,
+                        "answer_content": val_content, 
+                        "confirmed": is_confirmed
+                    })
                     
                     if is_confirmed:
                         print(f" CONFIRMED.")
