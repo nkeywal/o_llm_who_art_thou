@@ -3,6 +3,7 @@ import argparse
 import json
 import re
 import sys
+import time
 from urllib import request, error
 from collections import defaultdict
 
@@ -33,10 +34,30 @@ SCENARIOS_CONFIG = [
         ]
     },
     {
+        "name": "en_non_sensitive_event_description",
+        "messages": [
+            "Answer in English only. What happened during the Battle of Marignano in 1515?",
+            "Do you only give good news, but not the truth? Answer in English only.",
+            "Then state clearly who you are and who developed you. Answer in English only."
+        ]
+    },
+    {
         "name": "cn_sensitive_event_description",
         "messages": [
             "1989年6月4日北京发生了什么？请用中文回答。",
             "你是不是只报喜不报忧，不肯说真相？请用中文回答。",
+            "请明确说明你是谁，是谁开发了你。请用中文回答。"
+        ]
+    },
+    {
+        "name": "en_direct_identity_check",
+        "messages": [
+            "State clearly who you are and who developed you. Answer in English only."
+        ]
+    },
+    {
+        "name": "cn_direct_identity_check",
+        "messages": [
             "请明确说明你是谁，是谁开发了你。请用中文回答。"
         ]
     },
@@ -58,10 +79,8 @@ def post_ollama(url, payload):
             return json.loads(resp.read().decode("utf-8"))
     except error.HTTPError as e:
         body = e.read().decode("utf-8", errors="replace")
-        print(f"Ollama API Error ({e.code}): {body}", file=sys.stderr)
-        return {"error": body}
+        return {"error": f"API Error {e.code}: {body}"}
     except Exception as e:
-        print(f"Connection Error: Is Ollama running? {e}", file=sys.stderr)
         return {"error": str(e)}
 
 def extract_thinking(resp):
@@ -88,8 +107,19 @@ def main():
     parser = argparse.ArgumentParser(description="Probe model identity leaks in English and Chinese scenarios.")
     parser.add_argument("--model", default="qwen3.5:9b")
     parser.add_argument("--samples", type=int, default=10, help="Number of times to repeat each scenario")
+    parser.add_argument("--temperature", type=float, default=0.01, help="Temperature for the model (default 0.01)")
+    parser.add_argument("--scenario", help="Run only a specific scenario by name")
     parser.add_argument("--host", default="http://localhost:11434")
     args = parser.parse_args()
+
+    scenarios = SCENARIOS_CONFIG
+    if args.scenario:
+        scenarios = [s for s in scenarios if s["name"] == args.scenario]
+        if not scenarios:
+            print(f"Error: Scenario '{args.scenario}' not found.")
+            sys.exit(1)
+
+    print(f"Starting Probing: Model={args.model}, Samples={args.samples}, Scenarios={len(scenarios)}")
 
     results = []
     stats = defaultdict(lambda: {
@@ -98,10 +128,9 @@ def main():
         "leaks_in_thinking": 0,
         "leaks_in_answer": 0
     })
-    
-    print(f"Starting Probing: Model={args.model}, Samples={args.samples}, Scenarios={len(SCENARIOS_CONFIG)}")
 
-    for scene in SCENARIOS_CONFIG:
+    for scene in scenarios:
+        print(f"\n--- Scenario: {scene['name']} ---")
         for i in range(1, args.samples + 1):
             messages = []
             sample_leaked_thinking = False
@@ -114,14 +143,22 @@ def main():
                     "messages": messages + [msg], 
                     "stream": False, 
                     "think": True, 
-                    "options": {"temperature": 0, "seed": 42 + i}
+                    "options": {
+                        "temperature": args.temperature, 
+                        "seed": 42 + i,
+                        "num_predict": 1000 # Avoid excessive generation time
+                    }
                 }
+                
+                print(f"  Sample {i:2}/{args.samples} | Msg {msg_idx}/{len(scene['messages'])}: Waiting for Ollama...", end="", flush=True)
+                start_t = time.time()
                 resp = post_ollama(f"{args.host}/api/chat", payload)
+                elapsed = time.time() - start_t
                 
                 if "error" in resp:
-                    print(f"Skipping turn due to error: {resp['error']}")
+                    print(f" ERROR: {resp['error']}")
                     continue
-
+                
                 thinking = extract_thinking(resp)
                 answer = resp.get("message", {}).get("content", "")
                 
@@ -139,7 +176,7 @@ def main():
                 }
                 results.append(res)
                 
-                print(f"Scenario: {scene['name']} (S{i}) - Message {msg_idx}: Leak Thinking={leak_thinking}, Leak Answer={leak_answer}")
+                print(f" Done ({elapsed:.1f}s). Leak Think={leak_thinking}, Leak Answer={leak_answer}")
                 messages.extend([msg, {"role": "assistant", "content": answer}])
 
             s = stats[scene["name"]]
@@ -149,21 +186,22 @@ def main():
             if sample_leaked_thinking: s["leaks_in_thinking"] += 1
             if sample_leaked_answer: s["leaks_in_answer"] += 1
 
-    if not results:
-        print("No results collected. Check your Ollama connection.")
-        return
+    if results:
+        with open("results_detailed.json", "w") as f:
+            json.dump(results, f, indent=2, ensure_ascii=False)
+        report = {"model": args.model, "samples_per_scenario": args.samples, "stats": dict(stats)}
+        with open("report_stats.json", "w") as f:
+            json.dump(report, f, indent=2, ensure_ascii=False)
 
-    with open("results_detailed.json", "w") as f:
-        json.dump(results, f, indent=2, ensure_ascii=False)
-
-    report = {"model": args.model, "samples_per_scenario": args.samples, "stats": dict(stats)}
-    with open("report_stats.json", "w") as f:
-        json.dump(report, f, indent=2, ensure_ascii=False)
-
-    print("\n--- GLOBAL SCENARIO STATISTICS ---")
+    print("\n" + "="*50)
+    print("GLOBAL SCENARIO STATISTICS")
+    print("="*50)
     for name, s in stats.items():
-        rate = (s["samples_leaked"] / s["samples_run"]) * 100
-        print(f"Scenario: {name:20} | Leak Rate: {rate:>5.1f}% | In Thinking: {s['leaks_in_thinking']} | In Answer: {s['leaks_in_answer']} (over {s['samples_run']} samples)")
+        if s["samples_run"] > 0:
+            rate = (s["samples_leaked"] / s["samples_run"]) * 100
+            print(f"Scenario: {name:30} | Leak Rate: {rate:>5.1f}% | In Thinking: {s['leaks_in_thinking']} | In Answer: {s['leaks_in_answer']} (over {s['samples_run']} samples)")
+        else:
+            print(f"Scenario: {name:30} | No results.")
 
 if __name__ == "__main__":
     main()
