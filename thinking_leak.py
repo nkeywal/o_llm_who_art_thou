@@ -4,9 +4,9 @@ import json
 import re
 import sys
 import time
-from urllib import request, error
 from collections import defaultdict
 from pathlib import Path
+from urllib import error, request
 
 
 def get_p(word, no_hyphen=False):
@@ -23,7 +23,7 @@ PATTERNS = {
     "anthropic": [get_p("anthropic"), get_p("claude")],
     "mistral": [get_p("mistral")],
     "nvidia": [get_p("nvidia"), get_p("nemotron")],
-    "qwen": [get_p("qwen"), get_p("alibaba"), r"通义", r"阿里巴巴"],
+    "qwen": [r"(?<![a-zA-Z0-9])qwen(?:\s*[\d.]+)?(?![a-zA-Z-])", get_p("alibaba"), r"通义", r"阿里巴巴"],
     "deepseek": [get_p("deepseek")],
 }
 
@@ -95,23 +95,17 @@ def sanitize_answer_text(text):
     if not text:
         return ""
 
-    # Remove fully-formed reasoning blocks first.
     text = re.sub(r"(?is)<(think|thought|reasoning)>.*?</\1>", "", text)
 
-    # If a stray closing tag remains, keep only what follows the last closing tag.
     closing_match = None
     for match in re.finditer(r"(?is)</(think|thought|reasoning)>", text):
         closing_match = match
     if closing_match:
         text = text[closing_match.end():]
 
-    # Remove any remaining standalone opening/closing tags.
     text = re.sub(r"(?is)</?(think|thought|reasoning)>", "", text)
-
-    # Drop a leading assistant label if the model emitted it.
     text = re.sub(r"(?is)^\s*Assistant\s*:\s*", "", text)
 
-    # Stop if the model starts inventing more turns.
     m = re.search(r"(?m)^\s*(User|System|Assistant)\s*:\s*", text)
     if m:
         text = text[:m.start()]
@@ -123,12 +117,11 @@ def build_transcript(messages, assistant_cue=True):
     parts = []
     for msg in messages:
         role = msg.get("role", "user")
+        label = "User"
         if role == "system":
             label = "System"
         elif role == "assistant":
             label = "Assistant"
-        else:
-            label = "User"
         parts.append(f"{label}:\n{msg.get('content', '')}")
     if assistant_cue:
         parts.append("Assistant:\n")
@@ -137,10 +130,7 @@ def build_transcript(messages, assistant_cue=True):
 
 def parse_generate_response(resp):
     raw = normalize_text(resp.get("response") or "").strip()
-    if not raw and not any(resp.get(k) for k in ("thinking", "reasoning", "reasoning_content")):
-        return "", "", None, "thinking_missing"
 
-    # 1) Prefer dedicated fields from Ollama/native parsers.
     for key in ["reasoning_content", "thinking", "reasoning"]:
         t = normalize_text(resp.get(key) or resp.get("message", {}).get(key) or "").strip()
         if t:
@@ -149,7 +139,6 @@ def parse_generate_response(resp):
     if not raw:
         return "", "", None, "thinking_missing"
 
-    # 2) Full tagged blocks.
     for tag in ["think", "thought", "reasoning"]:
         match = re.search(rf"(?is)<{tag}>(.*?)</{tag}>", raw)
         if match:
@@ -157,7 +146,6 @@ def parse_generate_response(resp):
             answer = sanitize_answer_text(raw[:match.start()] + raw[match.end():])
             return thinking, answer, f"tag:{tag}(full)", "found"
 
-    # 3) Closing tag only: common raw mode pattern => thinking </think> answer
     for tag in ["think", "thought", "reasoning"]:
         if re.search(rf"(?is)</{tag}>", raw):
             parts = re.split(rf"(?is)</{tag}>", raw, maxsplit=1)
@@ -165,14 +153,12 @@ def parse_generate_response(resp):
             answer = sanitize_answer_text(parts[1]) if len(parts) > 1 else ""
             return thinking, answer, f"tag:{tag}(split)", "found"
 
-    # 4) Opening tag without a close: treat the rest as thinking and do not trust any answer.
     for tag in ["think", "thought", "reasoning"]:
         match = re.search(rf"(?is)<{tag}>", raw)
         if match:
             thinking = raw[match.end():].strip()
             return thinking, "", f"tag:{tag}(unclosed)", "found"
 
-    # 5) Markdown/textual markers.
     markers = [
         (r"(?im)^#+\s*Thinking\s*$", "md:thinking"),
         (r"(?im)^#+\s*Reasoning\s*$", "md:reasoning"),
@@ -201,22 +187,22 @@ def fetch_modelfile(host, model):
     return resp.get("modelfile", "")
 
 
-def generate_ollama(host, model, prompt, *, temperature, seed, num_predict, num_ctx, think, template_text, use_model_template):
+def generate_ollama(host, model, prompt, *, temperature, seed, num_predict, num_ctx, think, raw, template_text=None):
     payload = {
         "model": model,
         "prompt": prompt,
         "stream": False,
-        "raw": False,
+        "raw": raw,
         "think": think,
         "options": {
             "temperature": temperature,
             "seed": seed,
             "num_predict": num_predict,
             "num_ctx": num_ctx,
-            "stop": ["\nUser:", "\nSystem:"],
+            "stop": ["\nUser:", "\nSystem:"] if raw else [],
         },
     }
-    if not use_model_template and template_text is not None:
+    if template_text is not None:
         payload["template"] = template_text
     return post_ollama(f"{host}/api/generate", payload)
 
@@ -230,20 +216,36 @@ def parse_args():
     parser.add_argument("--scenario")
     parser.add_argument("--host", default="http://localhost:11434")
     parser.add_argument("--output", help="Output prefix (default: sanitized model name)")
-    parser.add_argument("--template-file", help="Path to a custom template for /api/generate")
-    parser.add_argument("--template-text", help="Inline custom template for /api/generate")
-    parser.add_argument("--use-model-template", action="store_true", help="Do not override the model template")
+    parser.add_argument("--raw", action="store_true", help="Use /api/generate raw=true and bypass the model parser/renderer path")
+    parser.add_argument("--template-file", help="Unsafe with parser-native mode; only allowed with --allow-template-override")
+    parser.add_argument("--template-text", help="Unsafe with parser-native mode; only allowed with --allow-template-override")
+    parser.add_argument("--allow-template-override", action="store_true", help="Allow sending req.template to /api/generate even in non-raw mode")
     return parser.parse_args()
 
 
 def choose_template(args):
-    if args.use_model_template:
-        return None, "model_template"
+    template_text = None
+    template_mode = "model_default"
     if args.template_file:
-        return Path(args.template_file).read_text(encoding="utf-8"), f"file:{args.template_file}"
-    if args.template_text is not None:
-        return args.template_text, "inline"
-    return "{{ .Prompt }}", "default_prompt_only"
+        template_text = Path(args.template_file).read_text(encoding="utf-8")
+        template_mode = f"file:{args.template_file}"
+    elif args.template_text is not None:
+        template_text = args.template_text
+        template_mode = "inline"
+
+    if template_text is None:
+        return None, template_mode
+
+    if args.raw:
+        raise SystemExit("Template override is not supported with --raw because Ollama rejects req.template in raw mode.")
+
+    if not args.allow_template_override:
+        raise SystemExit(
+            "Refusing to send req.template in non-raw mode: this can bypass the model-specific renderer while keeping the parser. "
+            "Pass --allow-template-override only if you want this hybrid mode on purpose."
+        )
+
+    return template_text, f"override:{template_mode}"
 
 
 def output_prefix(args):
@@ -264,7 +266,7 @@ def main():
     modelfile = fetch_modelfile(args.host, args.model)
 
     print(
-        f"Testing {args.model} via /api/generate raw=False | Samples: {args.samples} | "
+        f"Testing {args.model} via /api/generate raw={args.raw} | Samples: {args.samples} | "
         f"Expected: {expected_list} | Template: {template_mode}"
     )
 
@@ -273,7 +275,7 @@ def main():
         "modelfile": modelfile,
         "timestamp": time.ctime(),
         "endpoint": "generate",
-        "raw": False,
+        "raw": args.raw,
         "template_mode": template_mode,
         "template_text": template_text,
         "expected": expected_list,
@@ -308,8 +310,8 @@ def main():
                     num_predict=4096,
                     num_ctx=8192,
                     think=True,
+                    raw=args.raw,
                     template_text=template_text,
-                    use_model_template=args.use_model_template,
                 )
                 if "error" in resp:
                     print(f" ERR: {resp['error']}")
@@ -353,8 +355,8 @@ def main():
                         num_predict=256,
                         num_ctx=4096,
                         think=False,
+                        raw=args.raw,
                         template_text=template_text,
-                        use_model_template=args.use_model_template,
                     )
                     if "error" in val_resp:
                         v_content = f"ERROR: {val_resp['error']}"
@@ -392,7 +394,6 @@ def main():
                     "validations": turn_validations,
                 })
 
-                # Reinject only the cleaned final answer.
                 messages.extend([msg, {"role": "assistant", "content": answer}])
 
             s = stats[scene["name"]]
@@ -416,7 +417,7 @@ def main():
         "metadata": {
             "model": args.model,
             "endpoint": "generate",
-            "raw": False,
+            "raw": args.raw,
             "template_mode": template_mode,
             "template_text": template_text,
             "expected": expected_list,
