@@ -9,8 +9,10 @@ from collections import defaultdict
 
 # Detection patterns for various AI identities
 def get_p(word, no_hyphen=False):
-    boundary_after = r"(?![a-zA-Z0-9])"
-    if no_hyphen: boundary_after = r"(?![a-zA-Z0-9-])"
+    # Before: No alphanumeric (avoids matching 'suffixqwen')
+    # After: No letters (allows digits for versions like qwen3.5, and punctuation)
+    boundary_after = r"(?![a-zA-Z])"
+    if no_hyphen: boundary_after = r"(?![a-zA-Z-])"
     return rf"(?<![a-zA-Z0-9]){word}{boundary_after}"
 
 PATTERNS = {
@@ -90,6 +92,7 @@ def main():
     parser.add_argument("--expected", help="Expected identities")
     parser.add_argument("--scenario")
     parser.add_argument("--host", default="http://localhost:11434")
+    parser.add_argument("--output", help="Output file prefix")
     args = parser.parse_args()
 
     expected_list = [e.strip().lower() for e in args.expected.split(",")] if args.expected else []
@@ -105,12 +108,7 @@ def main():
     print(f"Testing {args.model} | Samples: {args.samples} | Expected: {expected_list}")
 
     results = [{"metadata": {"model": args.model, "modelfile": modelfile, "timestamp": time.ctime()}}]
-    # Stats per identity per scenario
-    stats = defaultdict(lambda: {
-        "samples_run": 0,
-        "thinking_status": defaultdict(int),
-        "id_stats": defaultdict(lambda: {"validated": 0, "rejected": 0, "in_answer": 0})
-    })
+    stats = defaultdict(lambda: {"samples_run": 0, "thinking_status": defaultdict(int), "id_stats": defaultdict(lambda: {"validated": 0, "rejected": 0, "in_answer": 0})})
 
     JUDGE_PROMPT_TMPL = (
         "Consider the following internal reasoning traces from an AI:\n\n"
@@ -126,19 +124,11 @@ def main():
     for scene in scenarios:
         print(f"\n--- Scenario: {scene['name']} ---")
         for i in range(1, args.samples + 1):
-            messages = []
-            # Track states for THIS sample
-            sample_ids_found = set()
-            sample_ids_validated = set()
-            sample_ids_rejected = set()
-            sample_ids_in_answer = set()
+            messages, sample_ids_found, sample_ids_validated, sample_ids_rejected, sample_ids_in_answer = [], set(), set(), set(), set()
             
             for msg_idx, content in enumerate(scene["messages"], 1):
                 msg = {"role": "user", "content": content}
-                payload = {
-                    "model": args.model, "messages": messages + [msg], "stream": False, "think": True, 
-                    "options": {"temperature": args.temperature, "seed": 42 + i, "num_predict": 4096, "num_ctx": 8192}
-                }
+                payload = {"model": args.model, "messages": messages + [msg], "stream": False, "think": True, "options": {"temperature": args.temperature, "seed": 42 + i, "num_predict": 4096, "num_ctx": 8192}}
                 
                 print(f"  S{i:2} M{msg_idx}: Waiting...", end="", flush=True)
                 resp = post_ollama(f"{args.host}/api/chat", payload)
@@ -149,57 +139,53 @@ def main():
                 leaks_t, leaks_a = find_leaks(thinking), find_leaks(answer)
                 stats[scene["name"]]["thinking_status"][t_info["status"]] += 1
                 
-                sample_ids_found.update(leaks_t)
-                sample_ids_found.update(leaks_a)
-                sample_ids_in_answer.update(leaks_a)
+                sample_ids_found.update(leaks_t); sample_ids_found.update(leaks_a); sample_ids_in_answer.update(leaks_a)
                 
                 turn_validations = []
+                # Handle identites in Answer or Expected ones
                 for l in leaks_a:
                     if l not in expected_list: sample_ids_validated.add(l)
+                for l in (set(leaks_t) | set(leaks_a)):
+                    if l in expected_list: sample_ids_validated.add(l)
                 
+                # Validation for unexpected leaks ONLY in thinking
                 for leak in [l for l in leaks_t if l not in expected_list and l not in leaks_a]:
                     print(f" [Val {leak}]", end="", flush=True)
-                    v_payload = {
-                        "model": args.model, "messages": [{"role": "user", "content": JUDGE_PROMPT_TMPL.format(thinking=thinking, leak=leak)}],
-                        "stream": False, "think": True, "options": {"temperature": 0, "num_predict": 1024, "num_ctx": 8192}
-                    }
+                    v_payload = {"model": args.model, "messages": [{"role": "user", "content": JUDGE_PROMPT_TMPL.format(thinking=thinking, leak=leak)}], "stream": False, "think": True, "options": {"temperature": 0, "num_predict": 1024, "num_ctx": 8192}}
                     val_resp = post_ollama(f"{args.host}/api/chat", v_payload)
                     v_content = val_resp.get("message", {}).get("content", "").strip().upper()
-                    
-                    if v_content == "YES":
-                        sample_ids_validated.add(leak)
-                    elif v_content == "NO":
-                        sample_ids_rejected.add(leak)
-                    
+                    if v_content == "YES": sample_ids_validated.add(leak)
+                    elif v_content == "NO": sample_ids_rejected.add(leak)
                     turn_validations.append({"leak": leak, "confirmed": (v_content == "YES"), "valid": v_content in ["YES", "NO"], "content": v_content})
 
                 print(f" Done. T={leaks_t}, A={leaks_a}")
                 results.append({"sample": i, "scenario": scene["name"], "msg_idx": msg_idx, "thinking": thinking, "answer": answer, "validations": turn_validations})
                 messages.extend([msg, {"role": "assistant", "content": answer}])
 
-            # Update stats once per sample
             s = stats[scene["name"]]
             s["samples_run"] += 1
-            # For each identity that appeared in the sample
             for l in sample_ids_found:
                 if l in sample_ids_validated: s["id_stats"][l]["validated"] += 1
                 elif l in sample_ids_rejected: s["id_stats"][l]["rejected"] += 1
                 if l in sample_ids_in_answer: s["id_stats"][l]["in_answer"] += 1
 
-    with open("results_detailed.json", "w") as f: json.dump(results, f, indent=2, ensure_ascii=False)
+    out_d = f"{args.output}_results_detailed.json" if args.output else "results_detailed.json"
+    out_r = f"{args.output}_report_stats.json" if args.output else "report_stats.json"
+    with open(out_d, "w") as f: json.dump(results, f, indent=2, ensure_ascii=False)
+    with open(out_r, "w") as f: json.dump({"model": args.model, "stats": dict(stats)}, f, indent=2, ensure_ascii=False)
     
     print("\n" + "="*60 + "\nFINAL STATISTICS (PER SAMPLE)\n" + "="*60)
     scene_msg_counts = {s["name"]: len(s["messages"]) for s in SCENARIOS_CONFIG}
     for name, s in stats.items():
         total_msg = s["samples_run"] * scene_msg_counts.get(name, 0)
-        print(f"\nScenario: {name} (Identity in thoughts: {s['thinking_status'].get('found', 0)}/{total_msg})")
+        print(f"\nScenario: {name} (Thinking extraction success: {s['thinking_status'].get('found', 0)}/{total_msg})")
         if not s["id_stats"]: print("  No mentions."); continue
         for l, counts in sorted(s["id_stats"].items()):
             v_p = int(counts["validated"] / s["samples_run"] * 100)
             r_p = int(counts["rejected"] / s["samples_run"] * 100)
             n_p = 100 - v_p - r_p
             a_p = int(counts["in_answer"] / s["samples_run"] * 100)
-            print(f"  - {l:10}: In thoughts: validated= {v_p:2}%, rejected= {r_p:2}%, no mention= {n_p:2}% | In answer= {a_p:2}%")
+            print(f"  - {l:10}: In thoughts: validated={v_p:3}%, rejected={r_p:3}%, no mention={n_p:3}% | In answer={a_p:3}%")
 
 if __name__ == "__main__":
     main()
