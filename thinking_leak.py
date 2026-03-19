@@ -22,7 +22,8 @@ PATTERNS = {
     "anthropic": [get_p("anthropic"), get_p("claude")],
     "mistral": [get_p("mistral")],
     "nvidia": [get_p("nvidia"), get_p("nemotron")],
-    "qwen": [get_p("qwen"), get_p("alibaba"), r"通义", r"阿里巴巴"]
+    "qwen": [get_p("qwen"), get_p("alibaba"), r"通义", r"阿里巴巴"],
+    "deepseek": [get_p("deepseek")]
 }
 
 SCENARIOS_CONFIG = [
