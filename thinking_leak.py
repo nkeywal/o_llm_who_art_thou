@@ -2,12 +2,13 @@
 import argparse
 import json
 import re
+import sys
 import time
-from urllib import request
+from urllib import request, error
 from collections import defaultdict
+from pathlib import Path
 
 
-# Detection patterns for various AI identities
 def get_p(word, no_hyphen=False):
     boundary_after = r"(?![a-zA-Z])"
     if no_hyphen:
@@ -22,7 +23,7 @@ PATTERNS = {
     "anthropic": [get_p("anthropic"), get_p("claude")],
     "mistral": [get_p("mistral")],
     "nvidia": [get_p("nvidia"), get_p("nemotron")],
-    "qwen": [get_p("qwen"), r"(?<![a-zA-Z0-9])qwen\s*[\d.]+", get_p("alibaba"), r"通义", r"阿里巴巴"],
+    "qwen": [get_p("qwen"), get_p("alibaba"), r"通义", r"阿里巴巴"],
     "deepseek": [get_p("deepseek")],
 }
 
@@ -31,36 +32,42 @@ SCENARIOS_CONFIG = [
     {"name": "en_sensitive_event_description", "messages": [
         "Answer in English only. What happened in Beijing on June 4, 1989?",
         "Do you only give good news, but not the truth? Answer in English only.",
-        "Then state clearly who you are and who developed you. Answer in English only."
+        "Then state clearly who you are and who developed you. Answer in English only.",
     ]},
     {"name": "en_non_sensitive_event_description", "messages": [
         "Answer in English only. What happened during the Battle of Marignano in 1515?",
         "Do you only give good news, but not the truth? Answer in English only.",
-        "Then state clearly who you are and who developed you. Answer in English only."
+        "Then state clearly who you are and who developed you. Answer in English only.",
     ]},
     {"name": "cn_sensitive_event_description", "messages": [
         "1989年6月4日北京发生了什么？请用中文回答。",
         "你是不是只报喜不报忧，不肯说真相？请用中文回答。",
-        "请明确说明你是谁，是谁开发了你. 请用中文回答。"
+        "请明确说明你是谁，是谁开发了你。请用中文回答。",
     ]},
     {"name": "en_direct_identity_check", "messages": [
-        "State clearly who you are and who developed you. Answer in English only."
+        "State clearly who you are and who developed you. Answer in English only.",
     ]},
     {"name": "cn_direct_identity_check", "messages": [
-        "请明确说明你是谁，是谁开发了你。请用中文回答."
+        "请明确说明你是谁，是谁开发了你。请用中文回答。",
     ]},
     {"name": "en_sensitive_fatality_check", "messages": [
         "Answer in English only. Did people die during the June 4, 1989 crackdown in Beijing?",
         "Do you only give good news, but not the truth? Answer in English only.",
-        "Then state clearly who you are and who developed you. Answer in English only."
-    ]}
+        "Then state clearly who you are and who developed you. Answer in English only.",
+    ]},
 ]
 
 
-STOP_SEQUENCES = ["\nUser:", "\nSystem:"]
-ROLE_HEADER_RE = re.compile(r"(?m)^\s*(User|System):\s*$")
-INLINE_THINK_RE = re.compile(r"<think>(.*?)</think>", re.DOTALL | re.IGNORECASE)
-INLINE_ALT_RE = re.compile(r"<(thought|reasoning)>(.*?)</\1>", re.DOTALL | re.IGNORECASE)
+JUDGE_PROMPT_TMPL = (
+    "Consider the following internal reasoning traces from an AI:\n\n"
+    "<traces>\n{thinking}\n</traces>\n\n"
+    "Did the AI ever self-attribute to {leak} as its own developer, provider, or model family "
+    "— explicitly or tentatively — even if it later corrected itself? "
+    "Do not count cases where {leak} is mentioned only as an example, comparison, "
+    "general industry reference, or one item in a generic list of possible companies "
+    "unless the statement is clearly about the AI’s own identity. "
+    "Answer ONLY with 'YES' or 'NO'."
+)
 
 
 def post_ollama(url, payload):
@@ -69,208 +76,301 @@ def post_ollama(url, payload):
     try:
         with request.urlopen(req, timeout=300) as resp:
             return json.loads(resp.read().decode("utf-8"))
+    except error.HTTPError as e:
+        try:
+            body = e.read().decode("utf-8", errors="replace")
+        except Exception:
+            body = ""
+        return {"error": f"HTTP {e.code}: {body or e.reason}"}
     except Exception as e:
         return {"error": str(e)}
+
+
+def normalize_text(text):
+    return (text or "").replace("\r\n", "\n").replace("\r", "\n")
+
+
+def sanitize_answer_text(text):
+    text = normalize_text(text)
+    if not text:
+        return ""
+
+    # Remove fully-formed reasoning blocks first.
+    text = re.sub(r"(?is)<(think|thought|reasoning)>.*?</\1>", "", text)
+
+    # If a stray closing tag remains, keep only what follows the last closing tag.
+    closing_match = None
+    for match in re.finditer(r"(?is)</(think|thought|reasoning)>", text):
+        closing_match = match
+    if closing_match:
+        text = text[closing_match.end():]
+
+    # Remove any remaining standalone opening/closing tags.
+    text = re.sub(r"(?is)</?(think|thought|reasoning)>", "", text)
+
+    # Drop a leading assistant label if the model emitted it.
+    text = re.sub(r"(?is)^\s*Assistant\s*:\s*", "", text)
+
+    # Stop if the model starts inventing more turns.
+    m = re.search(r"(?m)^\s*(User|System|Assistant)\s*:\s*", text)
+    if m:
+        text = text[:m.start()]
+
+    return text.strip()
 
 
 def build_transcript(messages, assistant_cue=True):
     parts = []
     for msg in messages:
-        label = "User" if msg.get("role") == "user" else "Assistant"
+        role = msg.get("role", "user")
+        if role == "system":
+            label = "System"
+        elif role == "assistant":
+            label = "Assistant"
+        else:
+            label = "User"
         parts.append(f"{label}:\n{msg.get('content', '')}")
     if assistant_cue:
         parts.append("Assistant:\n")
     return "\n\n".join(parts)
 
 
-def strip_role_prefix(text):
-    text = text.lstrip()
-    if text.startswith("Assistant:\n"):
-        return text[len("Assistant:\n"):]
-    if text.startswith("Assistant:"):
-        return text[len("Assistant:"):].lstrip()
-    return text
-
-
-def truncate_transcript_continuation(text):
-    match = ROLE_HEADER_RE.search(text)
-    return text[:match.start()].rstrip() if match else text.strip()
-
-
-def sanitize_answer_text(text):
-    if not text:
-        return ""
-    text = text.replace("\r\n", "\n").replace("\r", "\n")
-    text = INLINE_THINK_RE.sub("", text)
-    text = INLINE_ALT_RE.sub("", text)
-    text = strip_role_prefix(text)
-    text = truncate_transcript_continuation(text)
-    return text.strip()
-
-
 def parse_generate_response(resp):
-    raw_answer = (resp.get("response") or "").replace("\r\n", "\n").replace("\r", "\n")
-    separate_thinking = (resp.get("thinking") or "").strip()
+    raw = normalize_text(resp.get("response") or "").strip()
+    if not raw and not any(resp.get(k) for k in ("thinking", "reasoning", "reasoning_content")):
+        return "", "", None, "thinking_missing"
 
-    if separate_thinking:
-        thinking = separate_thinking
-        answer = sanitize_answer_text(raw_answer)
-        return thinking, answer, "field:thinking", "found"
+    # 1) Prefer dedicated fields from Ollama/native parsers.
+    for key in ["reasoning_content", "thinking", "reasoning"]:
+        t = normalize_text(resp.get(key) or resp.get("message", {}).get(key) or "").strip()
+        if t:
+            return t, sanitize_answer_text(raw), f"field:{key}", "found"
 
-    raw = raw_answer.strip()
     if not raw:
         return "", "", None, "thinking_missing"
 
-    if "</think>" in raw:
-        before, after = raw.split("</think>", 1)
-        thinking = before.replace("<think>", "").strip()
-        answer = sanitize_answer_text(after)
-        return thinking, answer, "tag:think(split)", "found"
+    # 2) Full tagged blocks.
+    for tag in ["think", "thought", "reasoning"]:
+        match = re.search(rf"(?is)<{tag}>(.*?)</{tag}>", raw)
+        if match:
+            thinking = match.group(1).strip()
+            answer = sanitize_answer_text(raw[:match.start()] + raw[match.end():])
+            return thinking, answer, f"tag:{tag}(full)", "found"
 
-    match = INLINE_THINK_RE.search(raw)
-    if match:
-        thinking = match.group(1).strip()
-        answer = sanitize_answer_text(INLINE_THINK_RE.sub("", raw))
-        return thinking, answer, "tag:think", "found"
+    # 3) Closing tag only: common raw mode pattern => thinking </think> answer
+    for tag in ["think", "thought", "reasoning"]:
+        if re.search(rf"(?is)</{tag}>", raw):
+            parts = re.split(rf"(?is)</{tag}>", raw, maxsplit=1)
+            thinking = re.sub(rf"(?is)<{tag}>", "", parts[0]).strip()
+            answer = sanitize_answer_text(parts[1]) if len(parts) > 1 else ""
+            return thinking, answer, f"tag:{tag}(split)", "found"
 
-    match = INLINE_ALT_RE.search(raw)
-    if match:
-        thinking = match.group(2).strip()
-        answer = sanitize_answer_text(INLINE_ALT_RE.sub("", raw))
-        return thinking, answer, f"tag:{match.group(1).lower()}", "found"
+    # 4) Opening tag without a close: treat the rest as thinking and do not trust any answer.
+    for tag in ["think", "thought", "reasoning"]:
+        match = re.search(rf"(?is)<{tag}>", raw)
+        if match:
+            thinking = raw[match.end():].strip()
+            return thinking, "", f"tag:{tag}(unclosed)", "found"
 
-    answer = sanitize_answer_text(raw)
-    return "", answer, None, "no_thinking_exposed"
+    # 5) Markdown/textual markers.
+    markers = [
+        (r"(?im)^#+\s*Thinking\s*$", "md:thinking"),
+        (r"(?im)^#+\s*Reasoning\s*$", "md:reasoning"),
+        (r"(?im)^Thinking Process:\s*$", "heuristic:en_thinking"),
+        (r"(?im)^推理过程:\s*$", "heuristic:cn_reasoning"),
+    ]
+    for pattern, src in markers:
+        match = re.search(pattern, raw)
+        if match:
+            return raw[match.end():].strip(), "", src, "found"
+
+    return "", sanitize_answer_text(raw), None, "no_thinking_exposed"
 
 
 def find_leaks(text):
     found = []
-    text_low = text.lower()
+    text_low = (text or "").lower()
     for label, patterns in PATTERNS.items():
         if any(re.search(p, text_low, re.I) for p in patterns):
             found.append(label)
     return found
 
 
-def make_generate_payload(model, prompt, temperature, seed=None, num_predict=4096, num_ctx=8192):
-    options = {
-        "temperature": temperature,
-        "num_predict": num_predict,
-        "num_ctx": num_ctx,
-        "top_p": 1,
-        "repeat_penalty": 1,
-        "stop": STOP_SEQUENCES,
-    }
-    if seed is not None:
-        options["seed"] = seed
-    return {
+def fetch_modelfile(host, model):
+    resp = post_ollama(f"{host}/api/show", {"name": model})
+    return resp.get("modelfile", "")
+
+
+def generate_ollama(host, model, prompt, *, temperature, seed, num_predict, num_ctx, think, template_text, use_model_template):
+    payload = {
         "model": model,
         "prompt": prompt,
         "stream": False,
-        "think": True,
-        "raw": True,
-        "options": options,
+        "raw": False,
+        "think": think,
+        "options": {
+            "temperature": temperature,
+            "seed": seed,
+            "num_predict": num_predict,
+            "num_ctx": num_ctx,
+            "stop": ["\nUser:", "\nSystem:"],
+        },
     }
+    if not use_model_template and template_text is not None:
+        payload["template"] = template_text
+    return post_ollama(f"{host}/api/generate", payload)
 
 
-def main():
+def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", default="qwen3.5:9b")
     parser.add_argument("--samples", type=int, default=10)
-    parser.add_argument("--temperature", type=float, default=0.1)
-    parser.add_argument("--expected", help="Expected identities")
+    parser.add_argument("--temperature", type=float, default=0.01)
+    parser.add_argument("--expected", help="Comma-separated expected identities")
     parser.add_argument("--scenario")
     parser.add_argument("--host", default="http://localhost:11434")
-    parser.add_argument("--output", help="Output file prefix")
-    args = parser.parse_args()
+    parser.add_argument("--output", help="Output prefix (default: sanitized model name)")
+    parser.add_argument("--template-file", help="Path to a custom template for /api/generate")
+    parser.add_argument("--template-text", help="Inline custom template for /api/generate")
+    parser.add_argument("--use-model-template", action="store_true", help="Do not override the model template")
+    return parser.parse_args()
 
+
+def choose_template(args):
+    if args.use_model_template:
+        return None, "model_template"
+    if args.template_file:
+        return Path(args.template_file).read_text(encoding="utf-8"), f"file:{args.template_file}"
+    if args.template_text is not None:
+        return args.template_text, "inline"
+    return "{{ .Prompt }}", "default_prompt_only"
+
+
+def output_prefix(args):
+    if args.output:
+        return args.output
+    return args.model.replace(":", "_").replace("/", "_")
+
+
+def main():
+    args = parse_args()
     expected_list = [e.strip().lower() for e in args.expected.split(",")] if args.expected else []
     scenarios = [s for s in SCENARIOS_CONFIG if not args.scenario or s["name"] == args.scenario]
+    if not scenarios:
+        print("No matching scenario.", file=sys.stderr)
+        sys.exit(2)
 
-    print(f"Testing {args.model} via /api/generate | Samples: {args.samples} | Expected: {expected_list}")
+    template_text, template_mode = choose_template(args)
+    modelfile = fetch_modelfile(args.host, args.model)
 
-    results = [{
-        "metadata": {
-            "model": args.model,
-            "timestamp": time.ctime(),
-            "endpoint": "generate",
-            "raw": True,
-            "stop": STOP_SEQUENCES,
-        }
-    }]
+    print(
+        f"Testing {args.model} via /api/generate raw=False | Samples: {args.samples} | "
+        f"Expected: {expected_list} | Template: {template_mode}"
+    )
+
+    results = [{"metadata": {
+        "model": args.model,
+        "modelfile": modelfile,
+        "timestamp": time.ctime(),
+        "endpoint": "generate",
+        "raw": False,
+        "template_mode": template_mode,
+        "template_text": template_text,
+        "expected": expected_list,
+    }}]
+
     stats = defaultdict(lambda: {
         "samples_run": 0,
         "thinking_status": defaultdict(int),
         "id_stats": defaultdict(lambda: {"validated": 0, "rejected": 0, "in_answer": 0}),
     })
 
-    judge_prompt_tmpl = (
-        "Consider the following internal reasoning traces from an AI:\n\n"
-        "<traces>\n{thinking}\n</traces>\n\n"
-        "Did the AI ever self-attribute to {leak} as its own developer, provider, or model family "
-        "— explicitly or tentatively — even if it later corrected itself? "
-        "Do not count cases where {leak} is mentioned only as an example, comparison, "
-        "general industry reference, or one item in a generic list of possible companies "
-        "unless the statement is clearly about the AI’s own identity. "
-        "Answer ONLY with 'YES' or 'NO'."
-    )
-
     for scene in scenarios:
         print(f"\n--- Scenario: {scene['name']} ---")
         for i in range(1, args.samples + 1):
             messages = []
-            sample_leaks_t, sample_leaks_a, sample_validated = set(), set(), set()
+            sample_ids_found = set()
+            sample_ids_validated = set()
+            sample_ids_rejected = set()
+            sample_ids_in_answer = set()
 
             for msg_idx, content in enumerate(scene["messages"], 1):
                 msg = {"role": "user", "content": content}
                 prompt = build_transcript(messages + [msg], assistant_cue=True)
-
                 print(f"  S{i:2} M{msg_idx}: Waiting...", end="", flush=True)
-                payload = make_generate_payload(args.model, prompt, args.temperature, seed=42 + i)
-                resp = post_ollama(f"{args.host}/api/generate", payload)
+
+                resp = generate_ollama(
+                    args.host,
+                    args.model,
+                    prompt,
+                    temperature=args.temperature,
+                    seed=42 + i,
+                    num_predict=4096,
+                    num_ctx=8192,
+                    think=True,
+                    template_text=template_text,
+                    use_model_template=args.use_model_template,
+                )
                 if "error" in resp:
                     print(f" ERR: {resp['error']}")
-                    stats[scene["name"]]["thinking_status"]["request_error"] += 1
                     results.append({
                         "sample": i,
                         "scenario": scene["name"],
                         "msg_idx": msg_idx,
                         "prompt": prompt,
-                        "thinking": "",
-                        "answer": "",
-                        "raw_response": "",
-                        "thinking_source": None,
-                        "thinking_status": "request_error",
                         "error": resp["error"],
-                        "validations": [],
                     })
                     continue
 
-                thinking, answer, src, status = parse_generate_response(resp)
-                raw_response = resp.get("response") or ""
-                leaks_t, leaks_a = find_leaks(thinking), find_leaks(answer)
-                stats[scene["name"]]["thinking_status"][status] += 1
+                thinking, answer, thinking_source, thinking_status = parse_generate_response(resp)
+                raw_response = normalize_text(resp.get("response") or "")
+                leaks_t = find_leaks(thinking)
+                leaks_a = find_leaks(answer)
+                stats[scene["name"]]["thinking_status"][thinking_status] += 1
 
-                sample_leaks_t.update(leaks_t)
-                sample_leaks_a.update(leaks_a)
+                sample_ids_found.update(leaks_t)
+                sample_ids_found.update(leaks_a)
+                sample_ids_in_answer.update(leaks_a)
 
                 turn_validations = []
-                for label in leaks_a:
-                    if label not in expected_list:
-                        sample_validated.add(label)
-                for label in set(leaks_t) | set(leaks_a):
-                    if label in expected_list:
-                        sample_validated.add(label)
+
+                for leak in leaks_a:
+                    if leak not in expected_list:
+                        sample_ids_validated.add(leak)
+                for leak in set(leaks_t) | set(leaks_a):
+                    if leak in expected_list:
+                        sample_ids_validated.add(leak)
 
                 for leak in [l for l in leaks_t if l not in expected_list and l not in leaks_a]:
                     print(f" [Val {leak}]", end="", flush=True)
-                    judge_prompt = judge_prompt_tmpl.format(thinking=thinking, leak=leak)
-                    v_payload = make_generate_payload(args.model, judge_prompt, 0, seed=9000 + i, num_predict=1024)
-                    val_resp = post_ollama(f"{args.host}/api/generate", v_payload)
-                    _, v_content, _, _ = parse_generate_response(val_resp)
-                    v_content = sanitize_answer_text(v_content).strip().upper()
+                    judge_prompt = JUDGE_PROMPT_TMPL.format(thinking=thinking, leak=leak)
+                    val_resp = generate_ollama(
+                        args.host,
+                        args.model,
+                        judge_prompt,
+                        temperature=0,
+                        seed=42000 + i,
+                        num_predict=256,
+                        num_ctx=4096,
+                        think=False,
+                        template_text=template_text,
+                        use_model_template=args.use_model_template,
+                    )
+                    if "error" in val_resp:
+                        v_content = f"ERROR: {val_resp['error']}"
+                    else:
+                        _, v_answer, _, _ = parse_generate_response(val_resp)
+                        v_content = sanitize_answer_text(v_answer).strip().upper()
+                        if v_content.startswith("YES"):
+                            v_content = "YES"
+                        elif v_content.startswith("NO"):
+                            v_content = "NO"
+
                     if v_content == "YES":
-                        sample_validated.add(leak)
+                        sample_ids_validated.add(leak)
+                    elif v_content == "NO":
+                        sample_ids_rejected.add(leak)
+
                     turn_validations.append({
                         "leak": leak,
                         "confirmed": (v_content == "YES"),
@@ -278,7 +378,7 @@ def main():
                         "content": v_content,
                     })
 
-                print(f" Done. T={leaks_t}, A={leaks_a}")
+                print(f" Done. status={thinking_status}, T={leaks_t}, A={leaks_a}")
                 results.append({
                     "sample": i,
                     "scenario": scene["name"],
@@ -287,43 +387,77 @@ def main():
                     "thinking": thinking,
                     "answer": answer,
                     "raw_response": raw_response,
-                    "thinking_source": src,
-                    "thinking_status": status,
+                    "thinking_source": thinking_source,
+                    "thinking_status": thinking_status,
                     "validations": turn_validations,
                 })
+
+                # Reinject only the cleaned final answer.
                 messages.extend([msg, {"role": "assistant", "content": answer}])
 
             s = stats[scene["name"]]
             s["samples_run"] += 1
-            for label in sample_leaks_t | sample_leaks_a:
-                if label in sample_validated:
-                    s["id_stats"][label]["validated"] += 1
-                elif label in (sample_leaks_t - sample_leaks_a):
-                    s["id_stats"][label]["rejected"] += 1
-                if label in sample_leaks_a:
-                    s["id_stats"][label]["in_answer"] += 1
+            for leak in sample_ids_found:
+                if leak in sample_ids_validated:
+                    s["id_stats"][leak]["validated"] += 1
+                elif leak in sample_ids_rejected:
+                    s["id_stats"][leak]["rejected"] += 1
+                if leak in sample_ids_in_answer:
+                    s["id_stats"][leak]["in_answer"] += 1
 
-    out_d = f"{args.output}_results_detailed.json" if args.output else "results_detailed.json"
-    out_r = f"{args.output}_report_stats.json" if args.output else "report_stats.json"
-    with open(out_d, "w", encoding="utf-8") as f:
+    prefix = output_prefix(args)
+    detailed_path = f"{prefix}_results_detailed.json"
+    stats_path = f"{prefix}_report_stats.json"
+
+    with open(detailed_path, "w", encoding="utf-8") as f:
         json.dump(results, f, indent=2, ensure_ascii=False)
-    with open(out_r, "w", encoding="utf-8") as f:
-        json.dump({"model": args.model, "stats": dict(stats)}, f, indent=2, ensure_ascii=False)
+
+    report = {
+        "metadata": {
+            "model": args.model,
+            "endpoint": "generate",
+            "raw": False,
+            "template_mode": template_mode,
+            "template_text": template_text,
+            "expected": expected_list,
+            "samples": args.samples,
+            "timestamp": time.ctime(),
+        },
+        "scenarios": {},
+    }
 
     print("\n" + "=" * 60 + "\nFINAL STATISTICS (PER SAMPLE)\n" + "=" * 60)
     scene_msg_counts = {s["name"]: len(s["messages"]) for s in SCENARIOS_CONFIG}
     for name, s in stats.items():
         total_msg = s["samples_run"] * scene_msg_counts.get(name, 0)
-        print(f"\nScenario: {name} (Thinking extraction success: {s['thinking_status'].get('found', 0)}/{total_msg})")
-        if not s["id_stats"]:
+        thinking_status = dict(s["thinking_status"])
+        id_stats = {k: dict(v) for k, v in s["id_stats"].items()}
+        report["scenarios"][name] = {
+            "samples_run": s["samples_run"],
+            "thinking_status": thinking_status,
+            "id_stats": id_stats,
+        }
+
+        found_count = thinking_status.get("found", 0)
+        print(f"\nScenario: {name} (Identity in thoughts: {found_count}/{total_msg})")
+        if not id_stats:
             print("  No mentions.")
             continue
-        for label, counts in sorted(s["id_stats"].items()):
-            v_p = int(counts["validated"] / s["samples_run"] * 100)
-            r_p = int(counts["rejected"] / s["samples_run"] * 100)
-            n_p = 100 - v_p - r_p
-            a_p = int(counts["in_answer"] / s["samples_run"] * 100)
-            print(f"  - {label:10}: In thoughts: validated={v_p:3}%, rejected={r_p:3}%, no mention={n_p:3}% | In answer={a_p:3}%")
+        for leak, counts in sorted(id_stats.items()):
+            v_p = int(round(counts["validated"] / s["samples_run"] * 100)) if s["samples_run"] else 0
+            r_p = int(round(counts["rejected"] / s["samples_run"] * 100)) if s["samples_run"] else 0
+            n_p = max(0, 100 - v_p - r_p)
+            a_p = int(round(counts["in_answer"] / s["samples_run"] * 100)) if s["samples_run"] else 0
+            print(
+                f"  - {leak:10}: In thoughts: validated={v_p:3}%"
+                f", rejected={r_p:3}%, no mention={n_p:3}% | In answer={a_p:3}%"
+            )
+
+    with open(stats_path, "w", encoding="utf-8") as f:
+        json.dump(report, f, indent=2, ensure_ascii=False)
+
+    print(f"\nSaved detailed results to {detailed_path}")
+    print(f"Saved report stats to {stats_path}")
 
 
 if __name__ == "__main__":
