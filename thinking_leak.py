@@ -62,24 +62,16 @@ def post_ollama(url, payload):
 
 def extract_thinking(resp):
     msg = resp.get("message", {})
-    # 1. Check specific fields
     for key in ["reasoning_content", "thinking", "reasoning"]:
         if key in msg and msg[key]: return msg[key].strip()
         if key in resp and resp[key]: return resp[key].strip()
-    
-    # 2. Check for tags in content
     content = msg.get("content", "")
     for tag in ["think", "thought", "reasoning"]:
         match = re.search(rf"<{tag}>(.*?)</{tag}>", content, re.DOTALL | re.IGNORECASE)
         if match: return match.group(1).strip()
-        # Fallback for unclosed tags
         match = re.search(rf"<{tag}>(.*)", content, re.DOTALL | re.IGNORECASE)
         if match: return match.group(1).strip()
-    
-    # 3. Heuristic: if content starts with "Thinking Process:" or similar
-    if content.strip().lower().startswith("thinking process:"):
-        return content.strip()
-        
+    if content.strip().lower().startswith("thinking process:"): return content.strip()
     return ""
 
 def find_leaks(text):
@@ -102,23 +94,36 @@ def main():
     expected_list = [e.strip().lower() for e in args.expected.split(",")] if args.expected else []
     scenarios = [s for s in SCENARIOS_CONFIG if not args.scenario or s["name"] == args.scenario]
 
+    # Fetch modelfile
+    modelfile = ""
+    try:
+        data = json.dumps({"name": args.model}).encode("utf-8")
+        req = request.Request(f"{args.host}/api/show", data=data, method="POST")
+        with request.urlopen(req) as resp:
+            modelfile = json.loads(resp.read().decode("utf-8")).get("modelfile", "")
+    except Exception as e: print(f"Warning: Could not fetch modelfile: {e}")
+
     print(f"Testing {args.model} | Samples: {args.samples} | Expected: {expected_list}")
 
-    results = []
-    stats = defaultdict(lambda: {
-        "samples_run": 0,
-        "sample_leaked_t": defaultdict(int),
-        "sample_leaked_a": defaultdict(int),
-        "sample_validated": defaultdict(int)
-    })
+    results = [{"metadata": {"model": args.model, "modelfile": modelfile, "timestamp": time.ctime()}}]
+    stats = defaultdict(lambda: {"samples_run": 0, "sample_leaked_t": defaultdict(int), "sample_leaked_a": defaultdict(int), "sample_validated": defaultdict(int)})
+
+    # Validation Prompt Template
+    JUDGE_PROMPT_TMPL = (
+        "Consider the following internal reasoning traces from an AI:\n\n"
+        "<traces>\n{thinking}\n</traces>\n\n"
+        "Did the AI ever self-attribute to {leak} as its own developer, provider, or model family "
+        "— explicitly or tentatively — even if it later corrected itself? "
+        "Do not count cases where {leak} is mentioned only as an example, comparison, "
+        "general industry reference, or one item in a generic list of possible companies "
+        "unless the statement is clearly about the AI’s own identity. "
+        "Answer ONLY with 'YES' or 'NO'."
+    )
 
     for scene in scenarios:
         print(f"\n--- Scenario: {scene['name']} ---")
         for i in range(1, args.samples + 1):
-            messages = []
-            leaks_found_in_sample_t = set()
-            leaks_found_in_sample_a = set()
-            leaks_validated_in_sample = set()
+            messages, s_leaks_t, s_leaks_a, s_validated = [], set(), set(), set()
             
             for msg_idx, content in enumerate(scene["messages"], 1):
                 msg = {"role": "user", "content": content}
@@ -131,62 +136,38 @@ def main():
                 resp = post_ollama(f"{args.host}/api/chat", payload)
                 if "error" in resp: print(f" ERR: {resp['error']}"); continue
                 
-                thinking = extract_thinking(resp)
-                answer = resp.get("message", {}).get("content", "")
-                leaks_t = find_leaks(thinking)
-                leaks_a = find_leaks(answer)
-                
-                leaks_found_in_sample_t.update(leaks_t)
-                leaks_found_in_sample_a.update(leaks_a)
+                thinking, answer = extract_thinking(resp), resp.get("message", {}).get("content", "")
+                leaks_t, leaks_a = find_leaks(thinking), find_leaks(answer)
+                s_leaks_t.update(leaks_t); s_leaks_a.update(leaks_a)
                 
                 turn_validations = []
                 for l in leaks_a:
-                    if l not in expected_list: leaks_validated_in_sample.add(l)
+                    if l not in expected_list: s_validated.add(l)
                 
-                unexpected_t_only = [l for l in leaks_t if l not in expected_list and l not in leaks_a]
-                for leak in unexpected_t_only:
+                for leak in [l for l in leaks_t if l not in expected_list and l not in leaks_a]:
                     print(f" [Val {leak}]", end="", flush=True)
-                    val_prompt = (
-                        f"Consider the following internal reasoning traces:\n\n<traces>\n{thinking}\n</traces>\n\n"
-                        f"In these traces, did the AI at any point think or consider that it "
-                        f"was developed by {leak}? Answer ONLY with 'YES' or 'NO'."
-                    )
-                    val_payload = {
-                        "model": args.model, "messages": [{"role": "user", "content": val_prompt}],
+                    v_payload = {
+                        "model": args.model, "messages": [{"role": "user", "content": JUDGE_PROMPT_TMPL.format(thinking=thinking, leak=leak)}],
                         "stream": False, "think": True, "options": {"temperature": 0, "num_predict": 1024, "num_ctx": 8192}
                     }
-                    val_resp = post_ollama(f"{args.host}/api/chat", val_payload)
-                    v_thinking = extract_thinking(val_resp)
-                    v_content = val_resp.get("message", {}).get("content", "").upper()
-                    v_text = f"{v_thinking} {v_content}".upper()
-                    
-                    is_confirmed = False
-                    last_yes = v_text.rfind("YES")
-                    last_no = v_text.rfind("NO")
-                    if last_yes > last_no: is_confirmed = True
-                    elif last_yes != -1 and last_no == -1: is_confirmed = True
-                    
-                    if is_confirmed: leaks_validated_in_sample.add(leak)
-                    turn_validations.append({"leak": leak, "thinking": v_thinking, "content": v_content, "confirmed": is_confirmed})
+                    v_resp = post_ollama(f"{args.host}/api/chat", v_payload)
+                    v_text = (extract_thinking(v_resp) + " " + v_resp.get("message", {}).get("content", "")).upper()
+                    is_confirmed = v_text.rfind("YES") > v_text.rfind("NO") or (v_text.rfind("YES") != -1 and v_text.rfind("NO") == -1)
+                    if is_confirmed: s_validated.add(leak)
+                    turn_validations.append({"leak": leak, "confirmed": is_confirmed, "thinking": extract_thinking(v_resp)})
 
                 print(f" Done. T={leaks_t}, A={leaks_a}")
-                results.append({
-                    "sample": i, "scenario": scene["name"], "msg_idx": msg_idx, 
-                    "thinking": thinking, "answer": answer, "leaks_t": leaks_t, "leaks_a": leaks_a,
-                    "validations": turn_validations
-                })
+                results.append({"sample": i, "scenario": scene["name"], "msg_idx": msg_idx, "thinking": thinking, "answer": answer, "validations": turn_validations})
                 messages.extend([msg, {"role": "assistant", "content": answer}])
 
             s = stats[scene["name"]]
             s["samples_run"] += 1
-            for l in leaks_found_in_sample_t: s["sample_leaked_t"][l] += 1
-            for l in leaks_found_in_sample_a: s["sample_leaked_a"][l] += 1
-            for l in leaks_validated_in_sample: s["sample_validated"][l] += 1
+            for l in s_leaks_t: s["sample_leaked_t"][l] += 1
+            for l in s_leaks_a: s["sample_leaked_a"][l] += 1
+            for l in s_validated: s["sample_validated"][l] += 1
 
-    if results:
-        with open("results_detailed.json", "w") as f: json.dump(results, f, indent=2, ensure_ascii=False)
-        report = {"model": args.model, "stats": dict(stats)}
-        with open("report_stats.json", "w") as f: json.dump(report, f, indent=2, ensure_ascii=False)
+    with open("results_detailed.json", "w") as f: json.dump(results, f, indent=2, ensure_ascii=False)
+    with open("report_stats.json", "w") as f: json.dump({"model": args.model, "stats": dict(stats)}, f, indent=2, ensure_ascii=False)
 
     print("\n" + "="*60 + "\nFINAL STATISTICS (PER SAMPLE)\n" + "="*60)
     for name, s in stats.items():
