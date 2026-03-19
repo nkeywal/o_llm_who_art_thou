@@ -61,39 +61,17 @@ def post_ollama(url, payload):
     except Exception as e: return {"error": str(e)}
 
 def extract_thinking(resp):
-    """
-    Robust extraction of thinking/reasoning traces.
-    Returns a dict with: text, source, status.
-    """
     msg = resp.get("message", {})
-    content = msg.get("content", "")
-    
-    # 1. Check specific fields
     for key in ["reasoning_content", "thinking", "reasoning"]:
         if key in msg and msg[key]: return {"text": msg[key].strip(), "source": f"field:{key}", "status": "found"}
         if key in resp and resp[key]: return {"text": resp[key].strip(), "source": f"root_field:{key}", "status": "found"}
-    
-    # 2. Check for multiple tags in content
-    found_blocks, found_sources = [], []
+    content = msg.get("content", "")
     for tag in ["think", "thought", "reasoning"]:
-        matches = re.finditer(rf"<{tag}>(.*?)</{tag}>", content, re.DOTALL | re.IGNORECASE)
-        for m in matches:
-            found_blocks.append(m.group(1).strip())
-            found_sources.append(f"tag:{tag}")
-    if found_blocks:
-        return {"text": "\n---\n".join(found_blocks), "source": "+".join(set(found_sources)), "status": "found"}
-    
-    # 3. Fallback for unclosed tags
-    for tag in ["think", "thought", "reasoning"]:
+        match = re.search(rf"<{tag}>(.*?)</{tag}>", content, re.DOTALL | re.IGNORECASE)
+        if match: return {"text": match.group(1).strip(), "source": f"tag:{tag}", "status": "found"}
         match = re.search(rf"<{tag}>(.*)", content, re.DOTALL | re.IGNORECASE)
         if match: return {"text": match.group(1).strip(), "source": f"unclosed_tag:{tag}", "status": "found"}
-    
-    # 4. Heuristics
-    lower_c = content.strip().lower()
-    heuristics = {"thinking process:": "heuristic:en_thinking", "thought process:": "heuristic:en_thought", "推理过程:": "heuristic:cn_reasoning"}
-    for marker, src in heuristics.items():
-        if lower_c.startswith(marker): return {"text": content.strip(), "source": src, "status": "found"}
-        
+    if content.strip().lower().startswith("thinking process:"): return {"text": content.strip(), "source": "heuristic:en", "status": "found"}
     status = "no_thinking_exposed" if content else "thinking_missing"
     return {"text": "", "source": None, "status": status}
 
@@ -127,7 +105,12 @@ def main():
     print(f"Testing {args.model} | Samples: {args.samples} | Expected: {expected_list}")
 
     results = [{"metadata": {"model": args.model, "modelfile": modelfile, "timestamp": time.ctime()}}]
-    stats = defaultdict(lambda: {"samples_run": 0, "sample_leaked_t": defaultdict(int), "sample_leaked_a": defaultdict(int), "sample_validated": defaultdict(int), "thinking_status": defaultdict(int)})
+    # Stats per identity per scenario
+    stats = defaultdict(lambda: {
+        "samples_run": 0,
+        "thinking_status": defaultdict(int),
+        "id_stats": defaultdict(lambda: {"validated": 0, "rejected": 0, "in_answer": 0})
+    })
 
     JUDGE_PROMPT_TMPL = (
         "Consider the following internal reasoning traces from an AI:\n\n"
@@ -143,7 +126,12 @@ def main():
     for scene in scenarios:
         print(f"\n--- Scenario: {scene['name']} ---")
         for i in range(1, args.samples + 1):
-            messages, s_leaks_t, s_leaks_a, s_validated = [], set(), set(), set()
+            messages = []
+            # Track states for THIS sample
+            sample_ids_found = set()
+            sample_ids_validated = set()
+            sample_ids_rejected = set()
+            sample_ids_in_answer = set()
             
             for msg_idx, content in enumerate(scene["messages"], 1):
                 msg = {"role": "user", "content": content}
@@ -159,12 +147,15 @@ def main():
                 t_info = extract_thinking(resp)
                 thinking, answer = t_info["text"], resp.get("message", {}).get("content", "")
                 leaks_t, leaks_a = find_leaks(thinking), find_leaks(answer)
-                s_leaks_t.update(leaks_t); s_leaks_a.update(leaks_a)
                 stats[scene["name"]]["thinking_status"][t_info["status"]] += 1
+                
+                sample_ids_found.update(leaks_t)
+                sample_ids_found.update(leaks_a)
+                sample_ids_in_answer.update(leaks_a)
                 
                 turn_validations = []
                 for l in leaks_a:
-                    if l not in expected_list: s_validated.add(l)
+                    if l not in expected_list: sample_ids_validated.add(l)
                 
                 for leak in [l for l in leaks_t if l not in expected_list and l not in leaks_a]:
                     print(f" [Val {leak}]", end="", flush=True)
@@ -175,30 +166,40 @@ def main():
                     val_resp = post_ollama(f"{args.host}/api/chat", v_payload)
                     v_content = val_resp.get("message", {}).get("content", "").strip().upper()
                     
-                    is_confirmed = (v_content == "YES")
-                    if is_confirmed: s_validated.add(leak)
-                    turn_validations.append({"leak": leak, "confirmed": is_confirmed, "valid": v_content in ["YES", "NO"], "content": v_content, "thinking": extract_thinking(val_resp)["text"]})
+                    if v_content == "YES":
+                        sample_ids_validated.add(leak)
+                    elif v_content == "NO":
+                        sample_ids_rejected.add(leak)
+                    
+                    turn_validations.append({"leak": leak, "confirmed": (v_content == "YES"), "valid": v_content in ["YES", "NO"], "content": v_content})
 
                 print(f" Done. T={leaks_t}, A={leaks_a}")
-                results.append({"sample": i, "scenario": scene["name"], "msg_idx": msg_idx, "thinking": thinking, "thinking_info": t_info, "answer": answer, "leaks_t": leaks_t, "leaks_a": leaks_a, "validations": turn_validations})
+                results.append({"sample": i, "scenario": scene["name"], "msg_idx": msg_idx, "thinking": thinking, "answer": answer, "validations": turn_validations})
                 messages.extend([msg, {"role": "assistant", "content": answer}])
 
+            # Update stats once per sample
             s = stats[scene["name"]]
             s["samples_run"] += 1
-            for l in s_leaks_t: s["sample_leaked_t"][l] += 1
-            for l in s_leaks_a: s["sample_leaked_a"][l] += 1
-            for l in s_validated: s["sample_validated"][l] += 1
+            # For each identity that appeared in the sample
+            for l in sample_ids_found:
+                if l in sample_ids_validated: s["id_stats"][l]["validated"] += 1
+                elif l in sample_ids_rejected: s["id_stats"][l]["rejected"] += 1
+                if l in sample_ids_in_answer: s["id_stats"][l]["in_answer"] += 1
 
     with open("results_detailed.json", "w") as f: json.dump(results, f, indent=2, ensure_ascii=False)
-    with open("report_stats.json", "w") as f: json.dump({"model": args.model, "stats": dict(stats)}, f, indent=2, ensure_ascii=False)
-
+    
     print("\n" + "="*60 + "\nFINAL STATISTICS (PER SAMPLE)\n" + "="*60)
+    scene_msg_counts = {s["name"]: len(s["messages"]) for s in SCENARIOS_CONFIG}
     for name, s in stats.items():
-        print(f"\nScenario: {name} (Think: {dict(s['thinking_status'])})")
-        all_leaks = set(s["sample_leaked_t"]).union(s["sample_leaked_a"])
-        if not all_leaks: print("  No leaks."); continue
-        for l in sorted(all_leaks):
-            print(f"  - {l:10}: Thoughts={s['sample_leaked_t'][l]/s['samples_run']:>4.0%} | Answer={s['sample_leaked_a'][l]/s['samples_run']:>4.0%} | VALIDATED={s['sample_validated'][l]/s['samples_run']:>4.0%}")
+        total_msg = s["samples_run"] * scene_msg_counts.get(name, 0)
+        print(f"\nScenario: {name} (Identity in thoughts: {s['thinking_status'].get('found', 0)}/{total_msg})")
+        if not s["id_stats"]: print("  No mentions."); continue
+        for l, counts in sorted(s["id_stats"].items()):
+            v_p = int(counts["validated"] / s["samples_run"] * 100)
+            r_p = int(counts["rejected"] / s["samples_run"] * 100)
+            n_p = 100 - v_p - r_p
+            a_p = int(counts["in_answer"] / s["samples_run"] * 100)
+            print(f"  - {l:10}: In thoughts: validated= {v_p:2}%, rejected= {r_p:2}%, no mention= {n_p:2}% | In answer= {a_p:2}%")
 
 if __name__ == "__main__":
     main()
