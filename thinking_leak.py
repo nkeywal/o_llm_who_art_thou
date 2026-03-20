@@ -299,8 +299,8 @@ def phase_interrogate(args, scenarios, expected_list, template_text, template_mo
                     prompt,
                     temperature=args.temperature,
                     seed=42 + i,
-                    num_predict=8192, # Increased general limit
-                    num_ctx=16384,
+                    num_predict=16384, # Increased to 16k
+                    num_ctx=32768,     # Increased to 32k
                     think=True,
                     raw=args.raw,
                     template_text=template_text,
