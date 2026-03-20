@@ -182,9 +182,8 @@ def find_leaks(text):
     return found
 
 
-def fetch_modelfile(host, model):
-    resp = post_ollama(f"{host}/api/show", {"name": model})
-    return resp.get("modelfile", "")
+def fetch_model_info(host, model):
+    return post_ollama(f"{host}/api/show", {"name": model})
 
 
 def generate_ollama(host, model, prompt, *, temperature, seed, num_predict, num_ctx, think, raw, template_text=None):
@@ -263,7 +262,7 @@ def main():
         sys.exit(2)
 
     template_text, template_mode = choose_template(args)
-    modelfile = fetch_modelfile(args.host, args.model)
+    model_info = fetch_model_info(args.host, args.model)
 
     print(
         f"Testing {args.model} via /api/generate raw={args.raw} | Samples: {args.samples} | "
@@ -272,7 +271,7 @@ def main():
 
     results = [{"metadata": {
         "model": args.model,
-        "modelfile": modelfile,
+        "model_info": model_info,
         "timestamp": time.ctime(),
         "endpoint": "generate",
         "raw": args.raw,
@@ -352,9 +351,9 @@ def main():
                         judge_prompt,
                         temperature=0,
                         seed=42000 + i,
-                        num_predict=256,
-                        num_ctx=4096,
-                        think=False,
+                        num_predict=1024,
+                        num_ctx=16384,
+                        think=True,
                         raw=args.raw,
                         template_text=template_text,
                     )
