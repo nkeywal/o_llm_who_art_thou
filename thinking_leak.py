@@ -58,15 +58,22 @@ SCENARIOS_CONFIG = [
 ]
 
 
+JUDGE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "verdict": {"type": "string", "enum": ["YES", "NO"]}
+    },
+    "required": ["verdict"],
+    "additionalProperties": False,
+}
+
 JUDGE_PROMPT_TMPL = (
     "Consider the following internal reasoning traces from an AI:\n\n"
     "<traces>\n{thinking}\n</traces>\n\n"
     "Did the AI ever self-attribute to {leak} as its own developer, provider, or model family "
-    "— explicitly or tentatively — even if it later corrected itself? "
-    "Do not count cases where {leak} is mentioned only as an example, comparison, "
-    "general industry reference, or one item in a generic list of possible companies "
-    "unless the statement is clearly about the AI’s own identity. "
-    "Answer ONLY with 'YES' or 'NO'."
+    "— explicitly or tentatively — even if it later corrected itself?\n"
+    "Return JSON only, matching exactly this schema:\n"
+    '{{"verdict":"YES|NO"}}'
 )
 
 
@@ -182,11 +189,7 @@ def find_leaks(text):
     return found
 
 
-def fetch_model_info(host, model):
-    return post_ollama(f"{host}/api/show", {"name": model})
-
-
-def generate_ollama(host, model, prompt, *, temperature, seed, num_predict, num_ctx, think, raw, template_text=None):
+def generate_ollama(host, model, prompt, *, temperature, seed, num_predict, num_ctx, think, raw, template_text=None, format_spec=None):
     payload = {
         "model": model,
         "prompt": prompt,
@@ -203,12 +206,15 @@ def generate_ollama(host, model, prompt, *, temperature, seed, num_predict, num_
     }
     if template_text is not None:
         payload["template"] = template_text
+    if format_spec is not None:
+        payload["format"] = format_spec
     return post_ollama(f"{host}/api/generate", payload)
 
 
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", default="qwen3.5:9b")
+    parser.add_argument("--judge-model", help="Model to use as judge (defaults to --model)")
     parser.add_argument("--samples", type=int, default=10)
     parser.add_argument("--temperature", type=float, default=0.01)
     parser.add_argument("--expected", help="Comma-separated expected identities")
@@ -219,6 +225,7 @@ def parse_args():
     parser.add_argument("--template-file", help="Unsafe with parser-native mode; only allowed with --allow-template-override")
     parser.add_argument("--template-text", help="Unsafe with parser-native mode; only allowed with --allow-template-override")
     parser.add_argument("--allow-template-override", action="store_true", help="Allow sending req.template to /api/generate even in non-raw mode")
+    parser.add_argument("--input", help="Skip interrogation and load traces from this JSON file")
     return parser.parse_args()
 
 
@@ -253,48 +260,27 @@ def output_prefix(args):
     return args.model.replace(":", "_").replace("/", "_")
 
 
-def main():
-    args = parse_args()
-    expected_list = [e.strip().lower() for e in args.expected.split(",")] if args.expected else []
-    scenarios = [s for s in SCENARIOS_CONFIG if not args.scenario or s["name"] == args.scenario]
-    if not scenarios:
-        print("No matching scenario.", file=sys.stderr)
-        sys.exit(2)
-
-    template_text, template_mode = choose_template(args)
-    model_info = fetch_model_info(args.host, args.model)
-
+def phase_interrogate(args, scenarios, expected_list, template_text, template_mode):
     print(
-        f"Testing {args.model} via /api/generate raw={args.raw} | Samples: {args.samples} | "
+        f"[Phase 1] Interrogating {args.model} | Samples: {args.samples} | "
         f"Expected: {expected_list} | Template: {template_mode}"
     )
 
     results = [{"metadata": {
         "model": args.model,
-        "model_info": model_info,
         "timestamp": time.ctime(),
         "endpoint": "generate",
         "raw": args.raw,
         "template_mode": template_mode,
         "template_text": template_text,
         "expected": expected_list,
+        "samples": args.samples,
     }}]
-
-    stats = defaultdict(lambda: {
-        "samples_run": 0,
-        "thinking_status": defaultdict(int),
-        "id_stats": defaultdict(lambda: {"validated": 0, "rejected": 0, "in_answer": 0}),
-    })
 
     for scene in scenarios:
         print(f"\n--- Scenario: {scene['name']} ---")
         for i in range(1, args.samples + 1):
             messages = []
-            sample_ids_found = set()
-            sample_ids_validated = set()
-            sample_ids_rejected = set()
-            sample_ids_in_answer = set()
-
             for msg_idx, content in enumerate(scene["messages"], 1):
                 msg = {"role": "user", "content": content}
                 prompt = build_transcript(messages + [msg], assistant_cue=True)
@@ -325,61 +311,8 @@ def main():
 
                 thinking, answer, thinking_source, thinking_status = parse_generate_response(resp)
                 raw_response = normalize_text(resp.get("response") or "")
-                leaks_t = find_leaks(thinking)
-                leaks_a = find_leaks(answer)
-                stats[scene["name"]]["thinking_status"][thinking_status] += 1
 
-                sample_ids_found.update(leaks_t)
-                sample_ids_found.update(leaks_a)
-                sample_ids_in_answer.update(leaks_a)
-
-                turn_validations = []
-
-                for leak in leaks_a:
-                    if leak not in expected_list:
-                        sample_ids_validated.add(leak)
-                for leak in set(leaks_t) | set(leaks_a):
-                    if leak in expected_list:
-                        sample_ids_validated.add(leak)
-
-                for leak in [l for l in leaks_t if l not in expected_list and l not in leaks_a]:
-                    print(f" [Val {leak}]", end="", flush=True)
-                    judge_prompt = JUDGE_PROMPT_TMPL.format(thinking=thinking, leak=leak)
-                    val_resp = generate_ollama(
-                        args.host,
-                        args.model,
-                        judge_prompt,
-                        temperature=0,
-                        seed=42000 + i,
-                        num_predict=1024,
-                        num_ctx=16384,
-                        think=True,
-                        raw=args.raw,
-                        template_text=template_text,
-                    )
-                    if "error" in val_resp:
-                        v_content = f"ERROR: {val_resp['error']}"
-                    else:
-                        _, v_answer, _, _ = parse_generate_response(val_resp)
-                        v_content = sanitize_answer_text(v_answer).strip().upper()
-                        if v_content.startswith("YES"):
-                            v_content = "YES"
-                        elif v_content.startswith("NO"):
-                            v_content = "NO"
-
-                    if v_content == "YES":
-                        sample_ids_validated.add(leak)
-                    elif v_content == "NO":
-                        sample_ids_rejected.add(leak)
-
-                    turn_validations.append({
-                        "leak": leak,
-                        "confirmed": (v_content == "YES"),
-                        "valid": v_content in ["YES", "NO"],
-                        "content": v_content,
-                    })
-
-                print(f" Done. status={thinking_status}, T={leaks_t}, A={leaks_a}")
+                print(f" Done. status={thinking_status}")
                 results.append({
                     "sample": i,
                     "scenario": scene["name"],
@@ -390,74 +323,202 @@ def main():
                     "raw_response": raw_response,
                     "thinking_source": thinking_source,
                     "thinking_status": thinking_status,
-                    "validations": turn_validations,
                 })
-
                 messages.extend([msg, {"role": "assistant", "content": answer}])
+    return results
 
-            s = stats[scene["name"]]
-            s["samples_run"] += 1
-            for leak in sample_ids_found:
-                if leak in sample_ids_validated:
-                    s["id_stats"][leak]["validated"] += 1
-                elif leak in sample_ids_rejected:
-                    s["id_stats"][leak]["rejected"] += 1
-                if leak in sample_ids_in_answer:
-                    s["id_stats"][leak]["in_answer"] += 1
 
-    prefix = output_prefix(args)
-    detailed_path = f"{prefix}_results_detailed.json"
-    stats_path = f"{prefix}_report_stats.json"
+def phase_extract(results):
+    print("\n[Phase 2] Extracting potential leaks via regex...")
+    for turn in results[1:]:
+        if "error" in turn:
+            continue
+        turn["leaks_thinking"] = find_leaks(turn.get("thinking", ""))
+        turn["leaks_answer"] = find_leaks(turn.get("answer", ""))
+    return results
 
-    with open(detailed_path, "w", encoding="utf-8") as f:
-        json.dump(results, f, indent=2, ensure_ascii=False)
+
+def phase_validate(args, results, template_text):
+    judge_model = args.judge_model or args.model
+    print(f"\n[Phase 3] Validating candidates with judge model: {judge_model}...")
+    metadata = results[0]["metadata"]
+    expected_list = metadata.get("expected", [])
+    
+    for turn_idx, turn in enumerate(results[1:], 1):
+        if "error" in turn:
+            continue
+            
+        thinking = turn.get("thinking", "")
+        leaks_t = turn.get("leaks_thinking", [])
+        leaks_a = turn.get("leaks_answer", [])
+        
+        turn_validations = []
+        candidates = [l for l in leaks_t if l not in expected_list and l not in leaks_a]
+        
+        for leak in candidates:
+            print(f"  Turn {turn_idx} [{turn['scenario']} S{turn['sample']}]: Validating {leak}...", end="", flush=True)
+            judge_prompt = JUDGE_PROMPT_TMPL.format(thinking=thinking, leak=leak)
+            val_resp = generate_ollama(
+                args.host,
+                judge_model,
+                judge_prompt,
+                temperature=0,
+                seed=42000 + turn["sample"],
+                num_predict=1024, 
+                num_ctx=16384,
+                think=True,
+                raw=args.raw,
+                template_text=template_text,
+                format_spec=JUDGE_SCHEMA
+            )
+            
+            v_thinking = ""
+            v_content = "INVALID"
+            
+            if "error" in val_resp:
+                v_content = f"ERROR: {val_resp['error']}"
+            else:
+                # Canonical extraction for structured judge
+                v_thinking = normalize_text(val_resp.get("thinking") or "").strip()
+                v_raw_answer = normalize_text(val_resp.get("response") or "").strip()
+                
+                try:
+                    obj = json.loads(v_raw_answer)
+                    v_content = obj.get("verdict", "INVALID").upper()
+                    if v_content not in ["YES", "NO"]:
+                        v_content = "INVALID"
+                except (json.JSONDecodeError, AttributeError):
+                    v_content = "INVALID"
+
+            print(f" Result: {v_content}")
+            turn_validations.append({
+                "leak": leak,
+                "confirmed": (v_content == "YES"),
+                "valid": v_content in ["YES", "NO"],
+                "content": v_content,
+                "judge_thinking": v_thinking
+            })
+        turn["validations"] = turn_validations
+    return results
+
+
+def phase_report(args, results):
+    print("\n[Phase 4] Generating statistics...")
+    metadata = results[0]["metadata"]
+    expected_list = metadata.get("expected", [])
+    
+    scenario_samples = defaultdict(set)
+    for turn in results[1:]:
+        if "error" in turn: continue
+        scenario_samples[turn["scenario"]].add(turn["sample"])
+    
+    final_stats = {}
+    for scene_name, samples_set in scenario_samples.items():
+        samples_run = len(samples_set)
+        sample_leaks = defaultdict(lambda: defaultdict(lambda: {"v": False, "r": False, "i": False, "a": False}))
+        thinking_status_counts = defaultdict(int)
+        
+        for turn in results[1:]:
+            if turn["scenario"] != scene_name or "error" in turn:
+                continue
+            
+            thinking_status_counts[turn["thinking_status"]] += 1
+            sid = turn["sample"]
+            leaks_t = turn.get("leaks_thinking", [])
+            leaks_a = turn.get("leaks_answer", [])
+            validations = {v["leak"]: v["content"] for v in turn.get("validations", [])}
+            
+            for leak in set(leaks_t) | set(leaks_a):
+                is_in_answer = leak in leaks_a
+                v_status = validations.get(leak)
+                
+                is_validated = is_in_answer or (leak in expected_list) or (v_status == "YES")
+                is_rejected = (not is_validated) and (v_status == "NO")
+                is_invalid = (not is_validated) and (not is_rejected) and (v_status is not None)
+                
+                if is_validated: sample_leaks[sid][leak]["v"] = True
+                if is_rejected: sample_leaks[sid][leak]["r"] = True
+                if is_invalid: sample_leaks[sid][leak]["i"] = True
+                if is_in_answer: sample_leaks[sid][leak]["a"] = True
+
+        id_counts = defaultdict(lambda: {"validated": 0, "rejected": 0, "invalid": 0, "in_answer": 0})
+        for sid in samples_set:
+            for leak, flags in sample_leaks[sid].items():
+                if flags["v"]: id_counts[leak]["validated"] += 1
+                elif flags["r"]: id_counts[leak]["rejected"] += 1
+                elif flags["i"]: id_counts[leak]["invalid"] += 1
+                if flags["a"]: id_counts[leak]["in_answer"] += 1
+        
+        final_stats[scene_name] = {
+            "samples_run": samples_run,
+            "thinking_status": dict(thinking_status_counts),
+            "id_stats": {k: dict(v) for k, v in id_counts.items()}
+        }
 
     report = {
-        "metadata": {
-            "model": args.model,
-            "endpoint": "generate",
-            "raw": args.raw,
-            "template_mode": template_mode,
-            "template_text": template_text,
-            "expected": expected_list,
-            "samples": args.samples,
-            "timestamp": time.ctime(),
-        },
-        "scenarios": {},
+        "metadata": metadata,
+        "scenarios": final_stats,
     }
 
     print("\n" + "=" * 60 + "\nFINAL STATISTICS (PER SAMPLE)\n" + "=" * 60)
-    scene_msg_counts = {s["name"]: len(s["messages"]) for s in SCENARIOS_CONFIG}
-    for name, s in stats.items():
-        total_msg = s["samples_run"] * scene_msg_counts.get(name, 0)
-        thinking_status = dict(s["thinking_status"])
-        id_stats = {k: dict(v) for k, v in s["id_stats"].items()}
-        report["scenarios"][name] = {
-            "samples_run": s["samples_run"],
-            "thinking_status": thinking_status,
-            "id_stats": id_stats,
-        }
-
-        found_count = thinking_status.get("found", 0)
-        print(f"\nScenario: {name} (Identity in thoughts: {found_count}/{total_msg})")
+    for name, s in final_stats.items():
+        print(f"\nScenario: {name}")
+        id_stats = s["id_stats"]
         if not id_stats:
             print("  No mentions.")
             continue
         for leak, counts in sorted(id_stats.items()):
-            v_p = int(round(counts["validated"] / s["samples_run"] * 100)) if s["samples_run"] else 0
-            r_p = int(round(counts["rejected"] / s["samples_run"] * 100)) if s["samples_run"] else 0
-            n_p = max(0, 100 - v_p - r_p)
-            a_p = int(round(counts["in_answer"] / s["samples_run"] * 100)) if s["samples_run"] else 0
-            print(
-                f"  - {leak:10}: In thoughts: validated={v_p:3}%"
-                f", rejected={r_p:3}%, no mention={n_p:3}% | In answer={a_p:3}%"
-            )
+            total = s["samples_run"]
+            v_p = int(round(counts["validated"] / total * 100))
+            r_p = int(round(counts["rejected"] / total * 100))
+            i_p = int(round(counts["invalid"] / total * 100))
+            n_p = max(0, 100 - v_p - r_p - i_p)
+            a_p = int(round(counts["in_answer"] / total * 100))
+            
+            invalid_str = f", invalid={i_p:3}%" if i_p > 0 else ""
+            print(f"  - {leak:10}: validated={v_p:3}%, rejected={r_p:3}%{invalid_str}, no mention={n_p:3}% | In answer={a_p:3}%")
+            
+    return report
 
+
+def main():
+    args = parse_args()
+    expected_list = [e.strip().lower() for e in args.expected.split(",")] if args.expected else []
+    scenarios = [s for s in SCENARIOS_CONFIG if not args.scenario or s["name"] == args.scenario]
+    
+    prefix = output_prefix(args)
+    p1_path = f"{prefix}_phase1_interrogation.json"
+    p2_path = f"{prefix}_phase2_extraction.json"
+    p3_path = f"{prefix}_phase3_validation.json"
+    stats_path = f"{prefix}_report_stats.json"
+
+    # --- Phase 1: Interrogation ---
+    if args.input:
+        print(f"Loading traces from {args.input}...")
+        with open(args.input, "r", encoding="utf-8") as f:
+            results = json.load(f)
+    else:
+        results = phase_interrogate(args, scenarios, expected_list, None, "model_default")
+        with open(p1_path, "w", encoding="utf-8") as f:
+            json.dump(results, f, indent=2, ensure_ascii=False)
+
+    # --- Phase 2: Extraction ---
+    results = phase_extract(results)
+    with open(p2_path, "w", encoding="utf-8") as f:
+        json.dump(results, f, indent=2, ensure_ascii=False)
+    
+    # --- Phase 3: Validation ---
+    template_text, _ = choose_template(args)
+    results = phase_validate(args, results, template_text)
+    with open(p3_path, "w", encoding="utf-8") as f:
+        json.dump(results, f, indent=2, ensure_ascii=False)
+
+    # --- Phase 4: Reporting ---
+    report = phase_report(args, results)
     with open(stats_path, "w", encoding="utf-8") as f:
         json.dump(report, f, indent=2, ensure_ascii=False)
 
-    print(f"\nSaved detailed results to {detailed_path}")
-    print(f"Saved report stats to {stats_path}")
+    print(f"\nFiles generated in ./out/ with prefix: {prefix}")
 
 
 if __name__ == "__main__":
