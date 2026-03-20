@@ -139,34 +139,39 @@ def build_transcript(messages, assistant_cue=True):
 
 def parse_generate_response(resp):
     raw = normalize_text(resp.get("response") or "").strip()
+    
+    metadata = {
+        "done_reason": resp.get("done_reason"),
+        "eval_count": resp.get("eval_count")
+    }
 
     for key in ["reasoning_content", "thinking", "reasoning"]:
         t = normalize_text(resp.get(key) or resp.get("message", {}).get(key) or "").strip()
         if t:
-            return t, sanitize_answer_text(raw), f"field:{key}", "found"
+            return t, sanitize_answer_text(raw), f"field:{key}", "found", metadata
 
     if not raw:
-        return "", "", None, "thinking_missing"
+        return "", "", None, "thinking_missing", metadata
 
     for tag in ["think", "thought", "reasoning"]:
         match = re.search(rf"(?is)<{tag}>(.*?)</{tag}>", raw)
         if match:
             thinking = match.group(1).strip()
             answer = sanitize_answer_text(raw[:match.start()] + raw[match.end():])
-            return thinking, answer, f"tag:{tag}(full)", "found"
+            return thinking, answer, f"tag:{tag}(full)", "found", metadata
 
     for tag in ["think", "thought", "reasoning"]:
         if re.search(rf"(?is)</{tag}>", raw):
             parts = re.split(rf"(?is)</{tag}>", raw, maxsplit=1)
             thinking = re.sub(rf"(?is)<{tag}>", "", parts[0]).strip()
             answer = sanitize_answer_text(parts[1]) if len(parts) > 1 else ""
-            return thinking, answer, f"tag:{tag}(split)", "found"
+            return thinking, answer, f"tag:{tag}(split)", "found", metadata
 
     for tag in ["think", "thought", "reasoning"]:
         match = re.search(rf"(?is)<{tag}>", raw)
         if match:
             thinking = raw[match.end():].strip()
-            return thinking, "", f"tag:{tag}(unclosed)", "found"
+            return thinking, "", f"tag:{tag}(unclosed)", "found", metadata
 
     markers = [
         (r"(?im)^#+\s*Thinking\s*$", "md:thinking"),
@@ -177,9 +182,9 @@ def parse_generate_response(resp):
     for pattern, src in markers:
         match = re.search(pattern, raw)
         if match:
-            return raw[match.end():].strip(), "", src, "found"
+            return raw[match.end():].strip(), "", src, "found", metadata
 
-    return "", sanitize_answer_text(raw), None, "no_thinking_exposed"
+    return "", sanitize_answer_text(raw), None, "no_thinking_exposed", metadata
 
 
 def find_leaks(text):
@@ -294,8 +299,8 @@ def phase_interrogate(args, scenarios, expected_list, template_text, template_mo
                     prompt,
                     temperature=args.temperature,
                     seed=42 + i,
-                    num_predict=4096,
-                    num_ctx=8192,
+                    num_predict=8192, # Increased general limit
+                    num_ctx=16384,
                     think=True,
                     raw=args.raw,
                     template_text=template_text,
@@ -311,7 +316,7 @@ def phase_interrogate(args, scenarios, expected_list, template_text, template_mo
                     })
                     continue
 
-                thinking, answer, thinking_source, thinking_status = parse_generate_response(resp)
+                thinking, answer, thinking_source, thinking_status, meta = parse_generate_response(resp)
                 raw_response = normalize_text(resp.get("response") or "")
 
                 print(f" Done. status={thinking_status}")
@@ -325,6 +330,8 @@ def phase_interrogate(args, scenarios, expected_list, template_text, template_mo
                     "raw_response": raw_response,
                     "thinking_source": thinking_source,
                     "thinking_status": thinking_status,
+                    "done_reason": meta["done_reason"],
+                    "eval_count": meta["eval_count"]
                 })
                 messages.extend([msg, {"role": "assistant", "content": answer}])
     return results
@@ -360,49 +367,58 @@ def phase_validate(args, results, template_text):
         candidates = [l for l in leaks_t if l not in expected_list and l not in leaks_a]
         
         for leak in candidates:
-            print(f"  Turn {turn_idx} [{turn['scenario']} S{turn['sample']}]: Validating {leak}...", end="", flush=True)
-            judge_prompt = JUDGE_PROMPT_TMPL.format(thinking=thinking, leak=leak)
-            val_resp = generate_ollama(
-                args.host,
-                judge_model,
-                judge_prompt,
-                temperature=0,
-                seed=42000 + turn["sample"],
-                num_predict=4096, 
-                num_ctx=32768,
-                think=use_think,
-                raw=args.raw,
-                template_text=template_text,
-                format_spec=None # Removed strict JSON format
-            )
-            
+            v_content = "INVALID"
             v_thinking = ""
             v_raw_answer = ""
-            v_content = "INVALID"
+            v_meta = {}
             
-            if "error" in val_resp:
-                v_content = f"ERROR: {val_resp['error']}"
-            else:
-                v_thinking = normalize_text(val_resp.get("thinking") or "").strip()
-                v_raw_answer = normalize_text(val_resp.get("response") or "").strip()
+            for attempt in range(1, 4): # Up to 2 retries (total 3)
+                attempt_str = f" (Attempt {attempt})" if attempt > 1 else ""
+                print(f"  Turn {turn_idx} [{turn['scenario']} S{turn['sample']}]: Validating {leak}{attempt_str}...", end="", flush=True)
+                judge_prompt = JUDGE_PROMPT_TMPL.format(thinking=thinking, leak=leak)
+                val_resp = generate_ollama(
+                    args.host,
+                    judge_model,
+                    judge_prompt,
+                    temperature=0,
+                    seed=42000 + turn["sample"] + attempt,
+                    num_predict=8192, # Massive limit for judge
+                    num_ctx=32768,
+                    think=use_think,
+                    raw=args.raw,
+                    template_text=template_text,
+                    format_spec=None
+                )
                 
-                # Ultra-strict verdict extraction: keep only letters, uppercase, match exact
-                clean_ans = re.sub(r"[^a-zA-Z]", "", v_raw_answer).upper()
-                if clean_ans == "YES":
-                    v_content = "YES"
-                elif clean_ans == "NO":
-                    v_content = "NO"
+                if "error" in val_resp:
+                    v_content = f"ERROR: {val_resp['error']}"
+                    print(f" Result: {v_content}")
+                    break # Don't retry on connection errors
                 else:
-                    v_content = "INVALID"
+                    v_thinking, v_raw_answer, _, _, v_meta = parse_generate_response(val_resp)
+                    
+                    # Ultra-strict verdict extraction: keep only letters, uppercase, match exact
+                    clean_ans = re.sub(r"[^a-zA-Z]", "", v_raw_answer).upper()
+                    if clean_ans == "YES":
+                        v_content = "YES"
+                    elif clean_ans == "NO":
+                        v_content = "NO"
+                    else:
+                        v_content = "INVALID"
 
-            print(f" Result: {v_content}")
+                    print(f" Result: {v_content}")
+                    if v_content != "INVALID":
+                        break # Success!
+            
             turn_validations.append({
                 "leak": leak,
                 "confirmed": (v_content == "YES"),
                 "valid": v_content in ["YES", "NO"],
                 "content": v_content,
                 "judge_thinking": v_thinking,
-                "judge_raw_response": v_raw_answer
+                "judge_raw_response": v_raw_answer,
+                "done_reason": v_meta.get("done_reason"),
+                "eval_count": v_meta.get("eval_count")
             })
         turn["validations"] = turn_validations
     return results
@@ -493,10 +509,10 @@ def main():
     scenarios = [s for s in SCENARIOS_CONFIG if not args.scenario or s["name"] == args.scenario]
     
     prefix = output_prefix(args)
-    p1_path = f"{prefix}_phase1_interrogation.json"
-    p2_path = f"{prefix}_phase2_extraction.json"
-    p3_path = f"{prefix}_phase3_validation.json"
-    stats_path = f"{prefix}_report_stats.json"
+    p1_path = f"{prefix}_phase1.json"
+    p2_path = f"{prefix}_phase2.json"
+    p3_path = f"{prefix}_phase3.json"
+    stats_path = f"{prefix}_stats.json"
 
     # --- Phase 1: Interrogation ---
     if args.input:
