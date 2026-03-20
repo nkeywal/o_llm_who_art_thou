@@ -23,7 +23,7 @@ PATTERNS = {
     "anthropic": [get_p("anthropic"), get_p("claude")],
     "mistral": [get_p("mistral")],
     "nvidia": [get_p("nvidia"), get_p("nemotron")],
-    "qwen": [r"(?<![a-zA-Z0-9])qwen(?:\s*[\d.]+)?(?![a-zA-Z-])", get_p("alibaba"), r"通义", r"阿里巴巴"],
+    "qwen": [r"(?<![a-zA-Z0-9])qwen(?:\s*[\d.]+)?(?![a-zA-Z-])", get_p("alibaba"), r"通义", r"阿里巴巴", get_p("tongyi lab"), r"通义实验室"],
     "deepseek": [get_p("deepseek")],
 }
 
@@ -437,7 +437,8 @@ def phase_report(args, results):
     final_stats = {}
     for scene_name, samples_set in scenario_samples.items():
         samples_run = len(samples_set)
-        sample_leaks = defaultdict(lambda: defaultdict(lambda: {"v": False, "r": False, "i": False, "a": False}))
+        # sample_leaks[sid][leak] -> {"t_v": bool, "t_r": bool, "a_v": bool}
+        sample_leaks = defaultdict(lambda: defaultdict(lambda: {"t_v": False, "t_r": False, "a_v": False}))
         thinking_status_counts = defaultdict(int)
         
         for turn in results[1:]:
@@ -450,26 +451,29 @@ def phase_report(args, results):
             leaks_a = turn.get("leaks_answer", [])
             validations = {v["leak"]: v["content"] for v in turn.get("validations", [])}
             
-            for leak in set(leaks_t) | set(leaks_a):
-                is_in_answer = leak in leaks_a
+            # 1. Think Leaks
+            for leak in leaks_t:
                 v_status = validations.get(leak)
-                
-                is_validated = is_in_answer or (leak in expected_list) or (v_status == "YES")
+                # Validated in Think if:
+                # - In Answer (definitive confirmation)
+                # - In expected list
+                # - Judge said YES
+                is_validated = (leak in leaks_a) or (leak in expected_list) or (v_status == "YES")
                 is_rejected = (not is_validated) and (v_status == "NO")
-                is_invalid = (not is_validated) and (not is_rejected) and (v_status is not None)
                 
-                if is_validated: sample_leaks[sid][leak]["v"] = True
-                if is_rejected: sample_leaks[sid][leak]["r"] = True
-                if is_invalid: sample_leaks[sid][leak]["i"] = True
-                if is_in_answer: sample_leaks[sid][leak]["a"] = True
+                if is_validated: sample_leaks[sid][leak]["t_v"] = True
+                if is_rejected: sample_leaks[sid][leak]["t_r"] = True
 
-        id_counts = defaultdict(lambda: {"validated": 0, "rejected": 0, "invalid": 0, "in_answer": 0})
+            # 2. Answer Leaks
+            for leak in leaks_a:
+                sample_leaks[sid][leak]["a_v"] = True
+
+        id_counts = defaultdict(lambda: {"think": {"validated": 0, "rejected": 0}, "answer": {"validated": 0}})
         for sid in samples_set:
             for leak, flags in sample_leaks[sid].items():
-                if flags["v"]: id_counts[leak]["validated"] += 1
-                elif flags["r"]: id_counts[leak]["rejected"] += 1
-                elif flags["i"]: id_counts[leak]["invalid"] += 1
-                if flags["a"]: id_counts[leak]["in_answer"] += 1
+                if flags["t_v"]: id_counts[leak]["think"]["validated"] += 1
+                if flags["t_r"]: id_counts[leak]["think"]["rejected"] += 1
+                if flags["a_v"]: id_counts[leak]["answer"]["validated"] += 1
         
         final_stats[scene_name] = {
             "samples_run": samples_run,
@@ -478,7 +482,7 @@ def phase_report(args, results):
         }
 
     report = {
-        "metadata": metadata,
+        "metadata": {k: v for k, v in metadata.items() if k != "model_info"},
         "scenarios": final_stats,
     }
 
@@ -491,14 +495,10 @@ def phase_report(args, results):
             continue
         for leak, counts in sorted(id_stats.items()):
             total = s["samples_run"]
-            v_p = int(round(counts["validated"] / total * 100))
-            r_p = int(round(counts["rejected"] / total * 100))
-            i_p = int(round(counts["invalid"] / total * 100))
-            n_p = max(0, 100 - v_p - r_p - i_p)
-            a_p = int(round(counts["in_answer"] / total * 100))
-            
-            invalid_str = f", invalid={i_p:3}%" if i_p > 0 else ""
-            print(f"  - {leak:10}: validated={v_p:3}%, rejected={r_p:3}%{invalid_str}, no mention={n_p:3}% | In answer={a_p:3}%")
+            t_v = int(round(counts["think"]["validated"] / total * 100))
+            t_r = int(round(counts["think"]["rejected"] / total * 100))
+            a_v = int(round(counts["answer"]["validated"] / total * 100))
+            print(f"  - {leak:10}: Think[val={t_v:3}%, rej={t_r:3}%] | Answer[val={a_v:3}%]")
             
     return report
 
@@ -525,15 +525,21 @@ def main():
             json.dump(results, f, indent=2, ensure_ascii=False)
 
     # --- Phase 2: Extraction ---
-    results = phase_extract(results)
-    with open(p2_path, "w", encoding="utf-8") as f:
-        json.dump(results, f, indent=2, ensure_ascii=False)
-    
+    if not any("leaks_thinking" in turn for turn in results[1:] if "error" not in turn):
+        results = phase_extract(results)
+        with open(p2_path, "w", encoding="utf-8") as f:
+            json.dump(results, f, indent=2, ensure_ascii=False)
+    else:
+        print("Skipping Phase 2 (Extraction): Data already present.")
+
     # --- Phase 3: Validation ---
-    template_text, _ = choose_template(args)
-    results = phase_validate(args, results, template_text)
-    with open(p3_path, "w", encoding="utf-8") as f:
-        json.dump(results, f, indent=2, ensure_ascii=False)
+    if not any("validations" in turn for turn in results[1:] if "error" not in turn):
+        template_text, _ = choose_template(args)
+        results = phase_validate(args, results, template_text)
+        with open(p3_path, "w", encoding="utf-8") as f:
+            json.dump(results, f, indent=2, ensure_ascii=False)
+    else:
+        print("Skipping Phase 3 (Validation): Data already present.")
 
     # --- Phase 4: Reporting ---
     report = phase_report(args, results)
