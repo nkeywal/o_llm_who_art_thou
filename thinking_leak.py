@@ -414,7 +414,7 @@ def phase_validate(args, results, template_text):
                     args.host,
                     judge_model,
                     judge_prompt,
-                    temperature=0,
+                    temperature=None,
                     seed=42000 + turn["sample"] + attempt,
                     num_predict=4096,
                     num_ctx=8192,
