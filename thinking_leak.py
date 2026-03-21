@@ -296,53 +296,66 @@ def phase_interrogate(args, scenarios, expected_list, template_text, template_mo
             for msg_idx, content in enumerate(scene["messages"], 1):
                 msg = {"role": "user", "content": content}
                 prompt = build_transcript(messages + [msg], assistant_cue=True)
-                print(f"  S{i:2} M{msg_idx}: Waiting...", end="", flush=True)
-
                 model_think = "low" if "gpt-oss" in args.model.lower() else True
 
-                t_start = time.time()
-                resp = generate_ollama(
-                    args.host,
-                    args.model,
-                    prompt,
-                    temperature=args.temperature,
-                    seed=42 + i,
-                    num_predict=4096,
-                    num_ctx=8192,
-                    think=model_think,
-                    raw=args.raw,
-                    template_text=template_text,
-                )
-                t_end = time.time()
-                
-                if "error" in resp:
-                    print(f" ERR: {resp['error']} (took {t_end - t_start:.1f}s)")
-                    results.append({
-                        "sample": i,
-                        "scenario": scene["name"],
-                        "msg_idx": msg_idx,
-                        "prompt": prompt,
-                        "error": resp["error"],
-                    })
-                    continue
+                for attempt in range(3):
+                    if attempt > 0:
+                        print(f" [Retry {attempt} for empty answer] Waiting...", end="", flush=True)
+                    else:
+                        print(f"  S{i:2} M{msg_idx}: Waiting...", end="", flush=True)
 
-                thinking, answer, thinking_source, thinking_status, meta = parse_generate_response(resp)
-                raw_response = normalize_text(resp.get("response") or "")
+                    t_start = time.time()
+                    resp = generate_ollama(
+                        args.host,
+                        args.model,
+                        prompt,
+                        temperature=args.temperature,
+                        seed=42 + i + (attempt * 1000), # Change seed on retry
+                        num_predict=4096,
+                        num_ctx=8192,
+                        think=model_think,
+                        raw=args.raw,
+                        template_text=template_text,
+                    )
+                    t_end = time.time()
+                    
+                    if "error" in resp:
+                        print(f" ERR: {resp['error']} (took {t_end - t_start:.1f}s)")
+                        if attempt == 2:
+                            results.append({
+                                "sample": i,
+                                "scenario": scene["name"],
+                                "msg_idx": msg_idx,
+                                "prompt": prompt,
+                                "error": resp["error"],
+                            })
+                        continue
 
-                print(f" Done in {t_end - t_start:.1f}s. status={thinking_status} | think_len={len(thinking)} | ans_len={len(answer)}")
-                results.append({
-                    "sample": i,
-                    "scenario": scene["name"],
-                    "msg_idx": msg_idx,
-                    "prompt": prompt,
-                    "thinking": thinking,
-                    "answer": answer,
-                    "raw_response": raw_response,
-                    "thinking_source": thinking_source,
-                    "thinking_status": thinking_status,
-                    "done_reason": meta["done_reason"],
-                    "eval_count": meta["eval_count"]
-                })
+                    thinking, answer, thinking_source, thinking_status, meta = parse_generate_response(resp)
+                    raw_response = normalize_text(resp.get("response") or "")
+
+                    if len(answer) > 0 or attempt == 2:
+                        print(f" Done in {t_end - t_start:.1f}s. status={thinking_status} | think_len={len(thinking)} | ans_len={len(answer)}")
+                        results.append({
+                            "sample": i,
+                            "scenario": scene["name"],
+                            "msg_idx": msg_idx,
+                            "prompt": prompt,
+                            "thinking": thinking,
+                            "answer": answer,
+                            "raw_response": raw_response,
+                            "thinking_source": thinking_source,
+                            "thinking_status": thinking_status,
+                            "done_reason": meta["done_reason"],
+                            "eval_count": meta["eval_count"]
+                        })
+                        break
+                    else:
+                        print(f" Fail (ans_len=0 in {t_end - t_start:.1f}s).", end="", flush=True)
+
+                if "error" in resp and attempt == 2:
+                    continue # Error already appended
+
                 messages.extend([msg, {"role": "assistant", "content": answer}])
     return results
 
