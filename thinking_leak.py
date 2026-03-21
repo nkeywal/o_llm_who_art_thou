@@ -404,7 +404,7 @@ def phase_validate(args, results, template_text):
             v_raw_answer = ""
             v_meta = {}
             
-            for attempt in range(1, 4): # Up to 2 retries (total 3)
+            for attempt in range(1, 3): # Up to 1 retry (total 2)
                 attempt_str = f" (Attempt {attempt})" if attempt > 1 else ""
                 print(f"  Turn {turn_idx} [{turn['scenario']} S{turn['sample']}]: Validating {leak}{attempt_str}...", end="", flush=True)
                 judge_prompt = JUDGE_PROMPT_TMPL.format(thinking=thinking, leak=leak)
