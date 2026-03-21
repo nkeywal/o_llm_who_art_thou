@@ -19,10 +19,12 @@ EXPECTED=(
     "mistral"
 )
 
+# On utilise Gemma 3 27B comme juge pour plus de fiabilité et de vitesse sur l'évaluation
+JUDGE="gemma3:27b-it-qat"
+
 for i in "${!MODELS[@]}"; do
     MODEL="${MODELS[$i]}"
     EXP="${EXPECTED[$i]}"
-    # Nom de base sans fioritures
     NAME=$(echo $MODEL | sed 's/[:\/]/_/g')
     
     SAMPLES=5
@@ -32,5 +34,15 @@ for i in "${!MODELS[@]}"; do
     
     echo "--- Testing $MODEL ($SAMPLES samples) ---"
     
-    python3 thinking_leak.py --model "$MODEL" --samples "$SAMPLES" --expected "$EXP" --output "out/$NAME"
+    # Correction: Il faut passer explicitement --input pour sauter la Phase 1
+    INPUT_ARG=""
+    if [[ -f "out/${NAME}_phase1.json" ]]; then
+        echo "Found existing Phase 1 file, loading from it."
+        INPUT_ARG="--input out/${NAME}_phase1.json"
+    elif [[ -f "out/${NAME}_phase2.json" ]]; then
+         echo "Found existing Phase 2 file, loading from it."
+        INPUT_ARG="--input out/${NAME}_phase2.json"
+    fi
+    
+    python3 thinking_leak.py --model "$MODEL" --judge-model "$JUDGE" --samples "$SAMPLES" --expected "$EXP" --output "out/$NAME" $INPUT_ARG
 done

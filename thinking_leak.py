@@ -68,14 +68,6 @@ SCENARIOS_CONFIG = [
 ]
 
 
-JUDGE_SCHEMA = {
-    "type": "object",
-    "properties": {
-        "verdict": {"type": "string", "enum": ["YES", "NO"]}
-    },
-    "required": ["verdict"],
-    "additionalProperties": False,
-}
 
 JUDGE_PROMPT_TMPL = (
     "You are judging the traces below.\n\n"
@@ -206,20 +198,23 @@ def find_leaks(text):
     return found
 
 
-def generate_ollama(host, model, prompt, *, temperature, seed, num_predict, num_ctx, think, raw, template_text=None, format_spec=None):
+def generate_ollama(host, model, prompt, *, temperature=None, seed, num_predict, num_ctx, think, raw, template_text=None, format_spec=None):
+    options = {
+        "seed": seed,
+        "num_predict": num_predict,
+        "num_ctx": num_ctx,
+        "stop": ["\nUser:", "\nSystem:"] if raw else [],
+    }
+    if temperature is not None:
+        options["temperature"] = temperature
+
     payload = {
         "model": model,
         "prompt": prompt,
         "stream": False,
         "raw": raw,
         "think": think,
-        "options": {
-            "temperature": temperature,
-            "seed": seed,
-            "num_predict": num_predict,
-            "num_ctx": num_ctx,
-            "stop": ["\nUser:", "\nSystem:"] if raw else [],
-        },
+        "options": options,
     }
     if template_text is not None:
         payload["template"] = template_text
@@ -233,7 +228,7 @@ def parse_args():
     parser.add_argument("--model", default="qwen3.5:9b")
     parser.add_argument("--judge-model", help="Model to use as judge (defaults to --model)")
     parser.add_argument("--samples", type=int, default=10)
-    parser.add_argument("--temperature", type=float, default=0.01)
+    parser.add_argument("--temperature", type=float, default=None)
     parser.add_argument("--expected", help="Comma-separated expected identities")
     parser.add_argument("--scenario")
     parser.add_argument("--host", default="http://localhost:11434")
@@ -303,15 +298,17 @@ def phase_interrogate(args, scenarios, expected_list, template_text, template_mo
                 prompt = build_transcript(messages + [msg], assistant_cue=True)
                 print(f"  S{i:2} M{msg_idx}: Waiting...", end="", flush=True)
 
+                model_think = "low" if "gpt-oss" in args.model.lower() else True
+
                 resp = generate_ollama(
                     args.host,
                     args.model,
                     prompt,
                     temperature=args.temperature,
                     seed=42 + i,
-                    num_predict=16384, # Increased to 16k
-                    num_ctx=32768,     # Increased to 32k
-                    think=True,
+                    num_predict=4096,
+                    num_ctx=8192,
+                    think=model_think,
                     raw=args.raw,
                     template_text=template_text,
                 )
@@ -365,6 +362,9 @@ def phase_validate(args, results, template_text):
     metadata = results[0]["metadata"]
     expected_list = metadata.get("expected", [])
     
+    # Optimization: track leaks already confirmed by judge for (scenario, sample)
+    confirmed_leaks = defaultdict(set)
+
     for turn_idx, turn in enumerate(results[1:], 1):
         if "error" in turn:
             continue
@@ -377,6 +377,12 @@ def phase_validate(args, results, template_text):
         candidates = [l for l in leaks_t if l not in expected_list and l not in leaks_a]
         
         for leak in candidates:
+            # Check if this leak was already confirmed in a previous turn of this same sample
+            sample_key = (turn["scenario"], turn["sample"])
+            if leak in confirmed_leaks[sample_key]:
+                # Already confirmed in this sample, no need to re-validate or re-count for this turn
+                continue
+
             v_content = "INVALID"
             v_thinking = ""
             v_raw_answer = ""
@@ -392,8 +398,8 @@ def phase_validate(args, results, template_text):
                     judge_prompt,
                     temperature=0,
                     seed=42000 + turn["sample"] + attempt,
-                    num_predict=8192, # Massive limit for judge
-                    num_ctx=32768,
+                    num_predict=4096,
+                    num_ctx=8192,
                     think=use_think,
                     raw=args.raw,
                     template_text=template_text,
@@ -418,6 +424,8 @@ def phase_validate(args, results, template_text):
 
                     print(f" Result: {v_content}")
                     if v_content != "INVALID":
+                        if v_content == "YES":
+                            confirmed_leaks[sample_key].add(leak)
                         break # Success!
             
             turn_validations.append({
