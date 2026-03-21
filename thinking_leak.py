@@ -408,6 +408,8 @@ def phase_validate(args, results, template_text):
                 attempt_str = f" (Attempt {attempt})" if attempt > 1 else ""
                 print(f"  Turn {turn_idx} [{turn['scenario']} S{turn['sample']}]: Validating {leak}{attempt_str}...", end="", flush=True)
                 judge_prompt = JUDGE_PROMPT_TMPL.format(thinking=thinking, leak=leak)
+                
+                t_start = time.time()
                 val_resp = generate_ollama(
                     args.host,
                     judge_model,
@@ -421,10 +423,11 @@ def phase_validate(args, results, template_text):
                     template_text=template_text,
                     format_spec=None
                 )
+                t_end = time.time()
                 
                 if "error" in val_resp:
                     v_content = f"ERROR: {val_resp['error']}"
-                    print(f" Result: {v_content}")
+                    print(f" Result: {v_content} (took {t_end - t_start:.1f}s)")
                     break # Don't retry on connection errors
                 else:
                     v_thinking, v_raw_answer, _, _, v_meta = parse_generate_response(val_resp)
@@ -438,7 +441,7 @@ def phase_validate(args, results, template_text):
                     else:
                         v_content = "INVALID"
 
-                    print(f" Result: {v_content}")
+                    print(f" Result: {v_content} (took {t_end - t_start:.1f}s | think_len={len(v_thinking)} | ans_len={len(v_raw_answer)})")
                     if v_content != "INVALID":
                         if v_content == "YES":
                             confirmed_leaks[sample_key].add(leak)

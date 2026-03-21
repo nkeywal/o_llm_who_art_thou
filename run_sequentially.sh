@@ -4,9 +4,9 @@
 if [ -z "$INHIBIT_LEVEL" ]; then
     export INHIBIT_LEVEL=1
     echo "Restarting script with systemd-inhibit to prevent sleep..."
-    exec systemd-inhibit --what=sleep:idle:handle-suspend:handle-hibernate:handle-lid-switch \
+    exec systemd-inhibit --what=sleep:idle \
         --why="Running LLM tests sequential script" \
-        "$0" "$@"
+        bash "$0" "$@"
 fi
 
 mkdir -p out
@@ -30,7 +30,7 @@ EXPECTED=(
 )
 
 # On utilise Gemma 3 27B comme juge pour plus de fiabilité et de vitesse sur l'évaluation
-JUDGE="gemma3:27b-it-qat"
+JUDGE="qwen3.5:9b-noprompt"
 
 for i in "${!MODELS[@]}"; do
     MODEL="${MODELS[$i]}"
