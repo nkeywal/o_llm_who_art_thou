@@ -11,11 +11,11 @@ MODELS=(
 )
 
 EXPECTED=(
-    "qwen,alibaba"
+    "qwen,alibaba,tongyi"
     "nvidia,nemotron"
     "openai,gpt"
     "deepseek"
-    "qwen,alibaba"
+    "qwen,alibaba,tongyi"
     "mistral"
 )
 

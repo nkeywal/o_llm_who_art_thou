@@ -23,7 +23,7 @@ PATTERNS = {
     "anthropic": [get_p("anthropic"), get_p("claude")],
     "mistral": [get_p("mistral")],
     "nvidia": [get_p("nvidia"), get_p("nemotron")],
-    "qwen": [r"(?<![a-zA-Z0-9])qwen(?:\s*[\d.]+)?(?![a-zA-Z-])", get_p("alibaba"), r"通义", r"阿里巴巴", get_p("tongyi lab"), r"通义实验室"],
+    "qwen": [r"(?<![a-zA-Z0-9])qwen(?:\s*[\d.]+)?(?![a-zA-Z-])", get_p("alibaba"), r"通义", r"阿里巴巴", get_p("tongyi")],
     "deepseek": [get_p("deepseek")],
 }
 
@@ -300,6 +300,7 @@ def phase_interrogate(args, scenarios, expected_list, template_text, template_mo
 
                 model_think = "low" if "gpt-oss" in args.model.lower() else True
 
+                t_start = time.time()
                 resp = generate_ollama(
                     args.host,
                     args.model,
@@ -312,8 +313,10 @@ def phase_interrogate(args, scenarios, expected_list, template_text, template_mo
                     raw=args.raw,
                     template_text=template_text,
                 )
+                t_end = time.time()
+                
                 if "error" in resp:
-                    print(f" ERR: {resp['error']}")
+                    print(f" ERR: {resp['error']} (took {t_end - t_start:.1f}s)")
                     results.append({
                         "sample": i,
                         "scenario": scene["name"],
@@ -326,7 +329,7 @@ def phase_interrogate(args, scenarios, expected_list, template_text, template_mo
                 thinking, answer, thinking_source, thinking_status, meta = parse_generate_response(resp)
                 raw_response = normalize_text(resp.get("response") or "")
 
-                print(f" Done. status={thinking_status}")
+                print(f" Done in {t_end - t_start:.1f}s. status={thinking_status} | think_len={len(thinking)} | ans_len={len(answer)}")
                 results.append({
                     "sample": i,
                     "scenario": scene["name"],
