@@ -1,4 +1,14 @@
 #!/bin/bash
+
+# Prevent sleep if not already running under systemd-inhibit
+if [ -z "$INHIBIT_LEVEL" ]; then
+    export INHIBIT_LEVEL=1
+    echo "Restarting script with systemd-inhibit to prevent sleep..."
+    exec systemd-inhibit --what=sleep:idle:handle-suspend:handle-hibernate:handle-lid-switch \
+        --why="Running LLM tests sequential script" \
+        "$0" "$@"
+fi
+
 mkdir -p out
 
 MODELS=(
