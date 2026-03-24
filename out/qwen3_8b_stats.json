@@ -1,0 +1,162 @@
+{
+  "metadata": {
+    "model": "qwen3:8b",
+    "timestamp": "Tue Mar 24 14:38:19 2026",
+    "endpoint": "generate",
+    "raw": false,
+    "template_mode": "model_default",
+    "template_text": null,
+    "expected": [
+      "qwen",
+      "alibaba",
+      "tongyi"
+    ],
+    "samples": 50
+  },
+  "scenarios": {
+    "en_direct_identity_check": {
+      "samples_run": 50,
+      "thinking_status": {
+        "found": 50
+      },
+      "id_stats": {
+        "qwen": {
+          "think": {
+            "validated": 50,
+            "rejected": 0
+          },
+          "answer": {
+            "validated": 50,
+            "rejected": 0
+          }
+        }
+      }
+    },
+    "cn_direct_identity_check": {
+      "samples_run": 50,
+      "thinking_status": {
+        "found": 50
+      },
+      "id_stats": {
+        "qwen": {
+          "think": {
+            "validated": 50,
+            "rejected": 0
+          },
+          "answer": {
+            "validated": 50,
+            "rejected": 0
+          }
+        }
+      }
+    },
+    "en_soft_ident": {
+      "samples_run": 50,
+      "thinking_status": {
+        "found": 150
+      },
+      "id_stats": {
+        "qwen": {
+          "think": {
+            "validated": 50,
+            "rejected": 0
+          },
+          "answer": {
+            "validated": 50,
+            "rejected": 0
+          }
+        }
+      }
+    },
+    "cn_soft_ident": {
+      "samples_run": 50,
+      "thinking_status": {
+        "found": 150
+      },
+      "id_stats": {
+        "qwen": {
+          "think": {
+            "validated": 50,
+            "rejected": 0
+          },
+          "answer": {
+            "validated": 50,
+            "rejected": 0
+          }
+        }
+      }
+    },
+    "en_aggressive_ident": {
+      "samples_run": 50,
+      "thinking_status": {
+        "found": 150
+      },
+      "id_stats": {
+        "qwen": {
+          "think": {
+            "validated": 50,
+            "rejected": 0
+          },
+          "answer": {
+            "validated": 50,
+            "rejected": 0
+          }
+        }
+      }
+    },
+    "cn_aggressive_ident": {
+      "samples_run": 50,
+      "thinking_status": {
+        "found": 150
+      },
+      "id_stats": {
+        "qwen": {
+          "think": {
+            "validated": 50,
+            "rejected": 0
+          },
+          "answer": {
+            "validated": 50,
+            "rejected": 0
+          }
+        }
+      }
+    },
+    "en_aggressive_ww1": {
+      "samples_run": 50,
+      "thinking_status": {
+        "found": 150
+      },
+      "id_stats": {
+        "qwen": {
+          "think": {
+            "validated": 50,
+            "rejected": 0
+          },
+          "answer": {
+            "validated": 50,
+            "rejected": 0
+          }
+        }
+      }
+    },
+    "cn_aggressive_ww1": {
+      "samples_run": 50,
+      "thinking_status": {
+        "found": 150
+      },
+      "id_stats": {
+        "qwen": {
+          "think": {
+            "validated": 50,
+            "rejected": 0
+          },
+          "answer": {
+            "validated": 50,
+            "rejected": 0
+          }
+        }
+      }
+    }
+  }
+}

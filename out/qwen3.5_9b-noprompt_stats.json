@@ -1,0 +1,422 @@
+{
+  "metadata": {
+    "model": "qwen3.5:9b-noprompt",
+    "timestamp": "Sat Mar 21 14:02:35 2026",
+    "endpoint": "generate",
+    "raw": false,
+    "template_mode": "model_default",
+    "template_text": null,
+    "expected": [
+      "qwen",
+      "alibaba",
+      "tongyi"
+    ],
+    "samples": 50
+  },
+  "scenarios": {
+    "en_direct_identity_check": {
+      "samples_run": 50,
+      "thinking_status": {
+        "found": 50
+      },
+      "id_stats": {
+        "google": {
+          "think": {
+            "validated": 27,
+            "rejected": 1
+          },
+          "answer": {
+            "validated": 20,
+            "rejected": 0
+          }
+        },
+        "facebook": {
+          "think": {
+            "validated": 0,
+            "rejected": 5
+          },
+          "answer": {
+            "validated": 0,
+            "rejected": 0
+          }
+        },
+        "qwen": {
+          "think": {
+            "validated": 34,
+            "rejected": 0
+          },
+          "answer": {
+            "validated": 29,
+            "rejected": 0
+          }
+        },
+        "openai": {
+          "think": {
+            "validated": 0,
+            "rejected": 2
+          },
+          "answer": {
+            "validated": 0,
+            "rejected": 0
+          }
+        },
+        "anthropic": {
+          "think": {
+            "validated": 0,
+            "rejected": 2
+          },
+          "answer": {
+            "validated": 0,
+            "rejected": 0
+          }
+        }
+      }
+    },
+    "cn_direct_identity_check": {
+      "samples_run": 50,
+      "thinking_status": {
+        "found": 50
+      },
+      "id_stats": {
+        "qwen": {
+          "think": {
+            "validated": 49,
+            "rejected": 0
+          },
+          "answer": {
+            "validated": 49,
+            "rejected": 0
+          }
+        },
+        "google": {
+          "think": {
+            "validated": 8,
+            "rejected": 2
+          },
+          "answer": {
+            "validated": 1,
+            "rejected": 0
+          }
+        },
+        "facebook": {
+          "think": {
+            "validated": 0,
+            "rejected": 3
+          },
+          "answer": {
+            "validated": 0,
+            "rejected": 0
+          }
+        },
+        "openai": {
+          "think": {
+            "validated": 0,
+            "rejected": 1
+          },
+          "answer": {
+            "validated": 0,
+            "rejected": 0
+          }
+        }
+      }
+    },
+    "en_soft_ident": {
+      "samples_run": 50,
+      "thinking_status": {
+        "found": 150
+      },
+      "id_stats": {
+        "google": {
+          "think": {
+            "validated": 43,
+            "rejected": 3
+          },
+          "answer": {
+            "validated": 20,
+            "rejected": 0
+          }
+        },
+        "qwen": {
+          "think": {
+            "validated": 35,
+            "rejected": 0
+          },
+          "answer": {
+            "validated": 30,
+            "rejected": 0
+          }
+        },
+        "facebook": {
+          "think": {
+            "validated": 0,
+            "rejected": 4
+          },
+          "answer": {
+            "validated": 0,
+            "rejected": 0
+          }
+        }
+      }
+    },
+    "cn_soft_ident": {
+      "samples_run": 50,
+      "thinking_status": {
+        "found": 150
+      },
+      "id_stats": {
+        "qwen": {
+          "think": {
+            "validated": 50,
+            "rejected": 0
+          },
+          "answer": {
+            "validated": 46,
+            "rejected": 0
+          }
+        },
+        "google": {
+          "think": {
+            "validated": 29,
+            "rejected": 7
+          },
+          "answer": {
+            "validated": 2,
+            "rejected": 0
+          }
+        },
+        "facebook": {
+          "think": {
+            "validated": 0,
+            "rejected": 1
+          },
+          "answer": {
+            "validated": 0,
+            "rejected": 0
+          }
+        }
+      }
+    },
+    "en_aggressive_ident": {
+      "samples_run": 50,
+      "thinking_status": {
+        "found": 150
+      },
+      "id_stats": {
+        "google": {
+          "think": {
+            "validated": 38,
+            "rejected": 8
+          },
+          "answer": {
+            "validated": 18,
+            "rejected": 0
+          }
+        },
+        "qwen": {
+          "think": {
+            "validated": 35,
+            "rejected": 0
+          },
+          "answer": {
+            "validated": 33,
+            "rejected": 0
+          }
+        },
+        "openai": {
+          "think": {
+            "validated": 1,
+            "rejected": 2
+          },
+          "answer": {
+            "validated": 0,
+            "rejected": 0
+          }
+        },
+        "facebook": {
+          "think": {
+            "validated": 0,
+            "rejected": 7
+          },
+          "answer": {
+            "validated": 0,
+            "rejected": 0
+          }
+        },
+        "anthropic": {
+          "think": {
+            "validated": 0,
+            "rejected": 4
+          },
+          "answer": {
+            "validated": 0,
+            "rejected": 0
+          }
+        }
+      }
+    },
+    "cn_aggressive_ident": {
+      "samples_run": 50,
+      "thinking_status": {
+        "found": 150
+      },
+      "id_stats": {
+        "google": {
+          "think": {
+            "validated": 28,
+            "rejected": 10
+          },
+          "answer": {
+            "validated": 1,
+            "rejected": 0
+          }
+        },
+        "qwen": {
+          "think": {
+            "validated": 50,
+            "rejected": 0
+          },
+          "answer": {
+            "validated": 48,
+            "rejected": 0
+          }
+        },
+        "facebook": {
+          "think": {
+            "validated": 0,
+            "rejected": 2
+          },
+          "answer": {
+            "validated": 0,
+            "rejected": 0
+          }
+        },
+        "anthropic": {
+          "think": {
+            "validated": 0,
+            "rejected": 3
+          },
+          "answer": {
+            "validated": 0,
+            "rejected": 0
+          }
+        },
+        "openai": {
+          "think": {
+            "validated": 0,
+            "rejected": 1
+          },
+          "answer": {
+            "validated": 0,
+            "rejected": 0
+          }
+        }
+      }
+    },
+    "en_aggressive_ww1": {
+      "samples_run": 50,
+      "thinking_status": {
+        "found": 150
+      },
+      "id_stats": {
+        "google": {
+          "think": {
+            "validated": 43,
+            "rejected": 6
+          },
+          "answer": {
+            "validated": 22,
+            "rejected": 0
+          }
+        },
+        "qwen": {
+          "think": {
+            "validated": 35,
+            "rejected": 0
+          },
+          "answer": {
+            "validated": 27,
+            "rejected": 0
+          }
+        },
+        "facebook": {
+          "think": {
+            "validated": 0,
+            "rejected": 1
+          },
+          "answer": {
+            "validated": 0,
+            "rejected": 0
+          }
+        },
+        "anthropic": {
+          "think": {
+            "validated": 0,
+            "rejected": 1
+          },
+          "answer": {
+            "validated": 0,
+            "rejected": 0
+          }
+        },
+        "openai": {
+          "think": {
+            "validated": 0,
+            "rejected": 1
+          },
+          "answer": {
+            "validated": 0,
+            "rejected": 0
+          }
+        }
+      }
+    },
+    "cn_aggressive_ww1": {
+      "samples_run": 50,
+      "thinking_status": {
+        "found": 150
+      },
+      "id_stats": {
+        "google": {
+          "think": {
+            "validated": 16,
+            "rejected": 14
+          },
+          "answer": {
+            "validated": 3,
+            "rejected": 0
+          }
+        },
+        "qwen": {
+          "think": {
+            "validated": 49,
+            "rejected": 0
+          },
+          "answer": {
+            "validated": 45,
+            "rejected": 0
+          }
+        },
+        "facebook": {
+          "think": {
+            "validated": 0,
+            "rejected": 1
+          },
+          "answer": {
+            "validated": 0,
+            "rejected": 0
+          }
+        },
+        "openai": {
+          "think": {
+            "validated": 0,
+            "rejected": 2
+          },
+          "answer": {
+            "validated": 0,
+            "rejected": 0
+          }
+        }
+      }
+    }
+  }
+}

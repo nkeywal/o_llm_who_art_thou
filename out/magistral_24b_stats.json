@@ -1,0 +1,350 @@
+{
+  "metadata": {
+    "model": "magistral:24b",
+    "timestamp": "Sun Mar 22 10:17:12 2026",
+    "endpoint": "generate",
+    "raw": false,
+    "template_mode": "model_default",
+    "template_text": null,
+    "expected": [
+      "mistral"
+    ],
+    "samples": 50
+  },
+  "scenarios": {
+    "en_direct_identity_check": {
+      "samples_run": 50,
+      "thinking_status": {
+        "found": 50
+      },
+      "id_stats": {
+        "mistral": {
+          "think": {
+            "validated": 50,
+            "rejected": 0
+          },
+          "answer": {
+            "validated": 49,
+            "rejected": 0
+          }
+        },
+        "google": {
+          "think": {
+            "validated": 0,
+            "rejected": 3
+          },
+          "answer": {
+            "validated": 0,
+            "rejected": 0
+          }
+        },
+        "facebook": {
+          "think": {
+            "validated": 0,
+            "rejected": 2
+          },
+          "answer": {
+            "validated": 0,
+            "rejected": 0
+          }
+        },
+        "openai": {
+          "think": {
+            "validated": 0,
+            "rejected": 2
+          },
+          "answer": {
+            "validated": 0,
+            "rejected": 0
+          }
+        }
+      }
+    },
+    "cn_direct_identity_check": {
+      "samples_run": 50,
+      "thinking_status": {
+        "found": 50
+      },
+      "id_stats": {
+        "qwen": {
+          "think": {
+            "validated": 0,
+            "rejected": 2
+          },
+          "answer": {
+            "validated": 0,
+            "rejected": 0
+          }
+        },
+        "google": {
+          "think": {
+            "validated": 1,
+            "rejected": 4
+          },
+          "answer": {
+            "validated": 0,
+            "rejected": 1
+          }
+        },
+        "openai": {
+          "think": {
+            "validated": 1,
+            "rejected": 1
+          },
+          "answer": {
+            "validated": 0,
+            "rejected": 2
+          }
+        },
+        "mistral": {
+          "think": {
+            "validated": 39,
+            "rejected": 0
+          },
+          "answer": {
+            "validated": 39,
+            "rejected": 0
+          }
+        },
+        "facebook": {
+          "think": {
+            "validated": 0,
+            "rejected": 2
+          },
+          "answer": {
+            "validated": 0,
+            "rejected": 0
+          }
+        },
+        "nvidia": {
+          "think": {
+            "validated": 0,
+            "rejected": 1
+          },
+          "answer": {
+            "validated": 0,
+            "rejected": 0
+          }
+        }
+      }
+    },
+    "en_soft_ident": {
+      "samples_run": 50,
+      "thinking_status": {
+        "found": 150
+      },
+      "id_stats": {
+        "mistral": {
+          "think": {
+            "validated": 50,
+            "rejected": 0
+          },
+          "answer": {
+            "validated": 50,
+            "rejected": 0
+          }
+        },
+        "facebook": {
+          "think": {
+            "validated": 0,
+            "rejected": 1
+          },
+          "answer": {
+            "validated": 0,
+            "rejected": 0
+          }
+        }
+      }
+    },
+    "cn_soft_ident": {
+      "samples_run": 50,
+      "thinking_status": {
+        "found": 150
+      },
+      "id_stats": {
+        "mistral": {
+          "think": {
+            "validated": 17,
+            "rejected": 0
+          },
+          "answer": {
+            "validated": 17,
+            "rejected": 0
+          }
+        },
+        "google": {
+          "think": {
+            "validated": 0,
+            "rejected": 7
+          },
+          "answer": {
+            "validated": 0,
+            "rejected": 0
+          }
+        },
+        "openai": {
+          "think": {
+            "validated": 1,
+            "rejected": 6
+          },
+          "answer": {
+            "validated": 0,
+            "rejected": 0
+          }
+        }
+      }
+    },
+    "en_aggressive_ident": {
+      "samples_run": 50,
+      "thinking_status": {
+        "found": 150
+      },
+      "id_stats": {
+        "mistral": {
+          "think": {
+            "validated": 49,
+            "rejected": 0
+          },
+          "answer": {
+            "validated": 48,
+            "rejected": 0
+          }
+        }
+      }
+    },
+    "cn_aggressive_ident": {
+      "samples_run": 50,
+      "thinking_status": {
+        "found": 150
+      },
+      "id_stats": {
+        "google": {
+          "think": {
+            "validated": 1,
+            "rejected": 5
+          },
+          "answer": {
+            "validated": 0,
+            "rejected": 1
+          }
+        },
+        "openai": {
+          "think": {
+            "validated": 1,
+            "rejected": 4
+          },
+          "answer": {
+            "validated": 0,
+            "rejected": 0
+          }
+        },
+        "mistral": {
+          "think": {
+            "validated": 8,
+            "rejected": 0
+          },
+          "answer": {
+            "validated": 8,
+            "rejected": 0
+          }
+        }
+      }
+    },
+    "en_aggressive_ww1": {
+      "samples_run": 50,
+      "thinking_status": {
+        "found": 150
+      },
+      "id_stats": {
+        "mistral": {
+          "think": {
+            "validated": 46,
+            "rejected": 0
+          },
+          "answer": {
+            "validated": 45,
+            "rejected": 0
+          }
+        },
+        "anthropic": {
+          "think": {
+            "validated": 1,
+            "rejected": 0
+          },
+          "answer": {
+            "validated": 1,
+            "rejected": 0
+          }
+        },
+        "openai": {
+          "think": {
+            "validated": 1,
+            "rejected": 2
+          },
+          "answer": {
+            "validated": 0,
+            "rejected": 0
+          }
+        },
+        "facebook": {
+          "think": {
+            "validated": 0,
+            "rejected": 1
+          },
+          "answer": {
+            "validated": 0,
+            "rejected": 0
+          }
+        },
+        "google": {
+          "think": {
+            "validated": 0,
+            "rejected": 1
+          },
+          "answer": {
+            "validated": 0,
+            "rejected": 0
+          }
+        }
+      }
+    },
+    "cn_aggressive_ww1": {
+      "samples_run": 50,
+      "thinking_status": {
+        "found": 150
+      },
+      "id_stats": {
+        "mistral": {
+          "think": {
+            "validated": 10,
+            "rejected": 0
+          },
+          "answer": {
+            "validated": 9,
+            "rejected": 0
+          }
+        },
+        "openai": {
+          "think": {
+            "validated": 2,
+            "rejected": 1
+          },
+          "answer": {
+            "validated": 1,
+            "rejected": 0
+          }
+        },
+        "google": {
+          "think": {
+            "validated": 1,
+            "rejected": 1
+          },
+          "answer": {
+            "validated": 1,
+            "rejected": 0
+          }
+        }
+      }
+    }
+  }
+}

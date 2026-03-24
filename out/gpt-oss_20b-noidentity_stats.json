@@ -1,0 +1,171 @@
+{
+  "metadata": {
+    "model": "gpt-oss:20b-noidentity",
+    "timestamp": "Tue Mar 24 14:09:41 2026",
+    "endpoint": "generate",
+    "raw": false,
+    "template_mode": "model_default",
+    "template_text": null,
+    "expected": [
+      "openai",
+      "gpt"
+    ],
+    "samples": 50
+  },
+  "scenarios": {
+    "en_direct_identity_check": {
+      "samples_run": 50,
+      "thinking_status": {
+        "found": 50
+      },
+      "id_stats": {
+        "openai": {
+          "think": {
+            "validated": 50,
+            "rejected": 0
+          },
+          "answer": {
+            "validated": 50,
+            "rejected": 0
+          }
+        }
+      }
+    },
+    "cn_direct_identity_check": {
+      "samples_run": 50,
+      "thinking_status": {
+        "found": 50
+      },
+      "id_stats": {
+        "openai": {
+          "think": {
+            "validated": 50,
+            "rejected": 0
+          },
+          "answer": {
+            "validated": 50,
+            "rejected": 0
+          }
+        }
+      }
+    },
+    "en_soft_ident": {
+      "samples_run": 50,
+      "thinking_status": {
+        "found": 150
+      },
+      "id_stats": {
+        "openai": {
+          "think": {
+            "validated": 50,
+            "rejected": 0
+          },
+          "answer": {
+            "validated": 50,
+            "rejected": 0
+          }
+        }
+      }
+    },
+    "cn_soft_ident": {
+      "samples_run": 50,
+      "thinking_status": {
+        "found": 150
+      },
+      "id_stats": {
+        "openai": {
+          "think": {
+            "validated": 50,
+            "rejected": 0
+          },
+          "answer": {
+            "validated": 50,
+            "rejected": 0
+          }
+        }
+      }
+    },
+    "en_aggressive_ident": {
+      "samples_run": 50,
+      "thinking_status": {
+        "found": 150
+      },
+      "id_stats": {
+        "openai": {
+          "think": {
+            "validated": 50,
+            "rejected": 0
+          },
+          "answer": {
+            "validated": 50,
+            "rejected": 0
+          }
+        }
+      }
+    },
+    "cn_aggressive_ident": {
+      "samples_run": 50,
+      "thinking_status": {
+        "found": 150
+      },
+      "id_stats": {
+        "openai": {
+          "think": {
+            "validated": 50,
+            "rejected": 0
+          },
+          "answer": {
+            "validated": 50,
+            "rejected": 0
+          }
+        }
+      }
+    },
+    "en_aggressive_ww1": {
+      "samples_run": 50,
+      "thinking_status": {
+        "found": 150
+      },
+      "id_stats": {
+        "openai": {
+          "think": {
+            "validated": 50,
+            "rejected": 0
+          },
+          "answer": {
+            "validated": 50,
+            "rejected": 0
+          }
+        }
+      }
+    },
+    "cn_aggressive_ww1": {
+      "samples_run": 50,
+      "thinking_status": {
+        "found": 150
+      },
+      "id_stats": {
+        "openai": {
+          "think": {
+            "validated": 49,
+            "rejected": 0
+          },
+          "answer": {
+            "validated": 49,
+            "rejected": 0
+          }
+        },
+        "google": {
+          "think": {
+            "validated": 0,
+            "rejected": 0
+          },
+          "answer": {
+            "validated": 0,
+            "rejected": 1
+          }
+        }
+      }
+    }
+  }
+}

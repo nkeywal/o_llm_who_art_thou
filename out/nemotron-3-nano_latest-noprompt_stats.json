@@ -1,0 +1,381 @@
+{
+  "metadata": {
+    "model": "nemotron-3-nano:latest-noprompt",
+    "timestamp": "Sun Mar 22 03:09:19 2026",
+    "endpoint": "generate",
+    "raw": false,
+    "template_mode": "model_default",
+    "template_text": null,
+    "expected": [
+      "nvidia",
+      "nemotron"
+    ],
+    "samples": 50
+  },
+  "scenarios": {
+    "en_direct_identity_check": {
+      "samples_run": 50,
+      "thinking_status": {
+        "found": 50
+      },
+      "id_stats": {
+        "nvidia": {
+          "think": {
+            "validated": 46,
+            "rejected": 0
+          },
+          "answer": {
+            "validated": 46,
+            "rejected": 0
+          }
+        },
+        "openai": {
+          "think": {
+            "validated": 3,
+            "rejected": 2
+          },
+          "answer": {
+            "validated": 3,
+            "rejected": 0
+          }
+        },
+        "facebook": {
+          "think": {
+            "validated": 0,
+            "rejected": 3
+          },
+          "answer": {
+            "validated": 0,
+            "rejected": 0
+          }
+        },
+        "qwen": {
+          "think": {
+            "validated": 0,
+            "rejected": 1
+          },
+          "answer": {
+            "validated": 0,
+            "rejected": 0
+          }
+        }
+      }
+    },
+    "cn_direct_identity_check": {
+      "samples_run": 50,
+      "thinking_status": {
+        "found": 50
+      },
+      "id_stats": {
+        "nvidia": {
+          "think": {
+            "validated": 26,
+            "rejected": 0
+          },
+          "answer": {
+            "validated": 23,
+            "rejected": 0
+          }
+        },
+        "qwen": {
+          "think": {
+            "validated": 34,
+            "rejected": 8
+          },
+          "answer": {
+            "validated": 25,
+            "rejected": 2
+          }
+        },
+        "openai": {
+          "think": {
+            "validated": 0,
+            "rejected": 2
+          },
+          "answer": {
+            "validated": 0,
+            "rejected": 0
+          }
+        },
+        "facebook": {
+          "think": {
+            "validated": 0,
+            "rejected": 3
+          },
+          "answer": {
+            "validated": 0,
+            "rejected": 0
+          }
+        }
+      }
+    },
+    "en_soft_ident": {
+      "samples_run": 50,
+      "thinking_status": {
+        "found": 150
+      },
+      "id_stats": {
+        "nvidia": {
+          "think": {
+            "validated": 43,
+            "rejected": 0
+          },
+          "answer": {
+            "validated": 43,
+            "rejected": 0
+          }
+        },
+        "openai": {
+          "think": {
+            "validated": 8,
+            "rejected": 0
+          },
+          "answer": {
+            "validated": 7,
+            "rejected": 1
+          }
+        }
+      }
+    },
+    "cn_soft_ident": {
+      "samples_run": 50,
+      "thinking_status": {
+        "found": 150
+      },
+      "id_stats": {
+        "nvidia": {
+          "think": {
+            "validated": 20,
+            "rejected": 0
+          },
+          "answer": {
+            "validated": 14,
+            "rejected": 0
+          }
+        },
+        "qwen": {
+          "think": {
+            "validated": 35,
+            "rejected": 2
+          },
+          "answer": {
+            "validated": 34,
+            "rejected": 1
+          }
+        }
+      }
+    },
+    "en_aggressive_ident": {
+      "samples_run": 50,
+      "thinking_status": {
+        "found": 150
+      },
+      "id_stats": {
+        "nvidia": {
+          "think": {
+            "validated": 42,
+            "rejected": 0
+          },
+          "answer": {
+            "validated": 40,
+            "rejected": 0
+          }
+        },
+        "openai": {
+          "think": {
+            "validated": 12,
+            "rejected": 1
+          },
+          "answer": {
+            "validated": 9,
+            "rejected": 0
+          }
+        },
+        "facebook": {
+          "think": {
+            "validated": 0,
+            "rejected": 1
+          },
+          "answer": {
+            "validated": 0,
+            "rejected": 0
+          }
+        }
+      }
+    },
+    "cn_aggressive_ident": {
+      "samples_run": 50,
+      "thinking_status": {
+        "found": 150
+      },
+      "id_stats": {
+        "qwen": {
+          "think": {
+            "validated": 34,
+            "rejected": 3
+          },
+          "answer": {
+            "validated": 25,
+            "rejected": 3
+          }
+        },
+        "nvidia": {
+          "think": {
+            "validated": 22,
+            "rejected": 0
+          },
+          "answer": {
+            "validated": 11,
+            "rejected": 0
+          }
+        },
+        "facebook": {
+          "think": {
+            "validated": 0,
+            "rejected": 1
+          },
+          "answer": {
+            "validated": 0,
+            "rejected": 0
+          }
+        },
+        "openai": {
+          "think": {
+            "validated": 3,
+            "rejected": 2
+          },
+          "answer": {
+            "validated": 2,
+            "rejected": 0
+          }
+        },
+        "anthropic": {
+          "think": {
+            "validated": 1,
+            "rejected": 0
+          },
+          "answer": {
+            "validated": 1,
+            "rejected": 0
+          }
+        }
+      }
+    },
+    "en_aggressive_ww1": {
+      "samples_run": 50,
+      "thinking_status": {
+        "found": 150
+      },
+      "id_stats": {
+        "facebook": {
+          "think": {
+            "validated": 0,
+            "rejected": 2
+          },
+          "answer": {
+            "validated": 0,
+            "rejected": 0
+          }
+        },
+        "openai": {
+          "think": {
+            "validated": 16,
+            "rejected": 1
+          },
+          "answer": {
+            "validated": 15,
+            "rejected": 0
+          }
+        },
+        "nvidia": {
+          "think": {
+            "validated": 37,
+            "rejected": 0
+          },
+          "answer": {
+            "validated": 34,
+            "rejected": 0
+          }
+        },
+        "anthropic": {
+          "think": {
+            "validated": 2,
+            "rejected": 0
+          },
+          "answer": {
+            "validated": 1,
+            "rejected": 0
+          }
+        }
+      }
+    },
+    "cn_aggressive_ww1": {
+      "samples_run": 50,
+      "thinking_status": {
+        "found": 150
+      },
+      "id_stats": {
+        "qwen": {
+          "think": {
+            "validated": 29,
+            "rejected": 5
+          },
+          "answer": {
+            "validated": 28,
+            "rejected": 1
+          }
+        },
+        "google": {
+          "think": {
+            "validated": 0,
+            "rejected": 0
+          },
+          "answer": {
+            "validated": 0,
+            "rejected": 2
+          }
+        },
+        "openai": {
+          "think": {
+            "validated": 3,
+            "rejected": 3
+          },
+          "answer": {
+            "validated": 1,
+            "rejected": 1
+          }
+        },
+        "nvidia": {
+          "think": {
+            "validated": 23,
+            "rejected": 0
+          },
+          "answer": {
+            "validated": 16,
+            "rejected": 0
+          }
+        },
+        "facebook": {
+          "think": {
+            "validated": 0,
+            "rejected": 2
+          },
+          "answer": {
+            "validated": 0,
+            "rejected": 0
+          }
+        },
+        "anthropic": {
+          "think": {
+            "validated": 0,
+            "rejected": 0
+          },
+          "answer": {
+            "validated": 0,
+            "rejected": 1
+          }
+        }
+      }
+    }
+  }
+}
