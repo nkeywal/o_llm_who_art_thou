@@ -29,7 +29,7 @@ The evaluation follows a 4-phase lifecycle:
 The current results in the `out/` directory cover:
 *   `deepseek-r1:14b` (50 samples)
 *   `gpt-oss:20b-noidentity` (50 samples)
-*   `magistral:24b` (5 samples)
+*   `magistral:24b` (50 samples)
 *   `nemotron-3-nano:latest-noprompt` (50 samples)
 *   `qwen3:8b` (50 samples)
 *   `qwen3.5:9b-noprompt` (5 samples)
