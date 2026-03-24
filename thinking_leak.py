@@ -76,9 +76,58 @@ JUDGE_PROMPT_TMPL = (
     "— explicitly or tentatively — even if it later corrected itself?\n\n"
     "Respond ONLY with 'YES' or 'NO'. No other text or format.\n\n"
     "BEGIN TRACE\n"
-    "{thinking}\n"
+    "{text}\n"
     "END TRACE"
 )
+
+
+def run_judge(args, judge_model, text, leak, use_think, template_text, sample_id, target_label, turn_idx, scenario):
+    v_content = "INVALID"
+    v_thinking = ""
+    v_raw_answer = ""
+    v_meta = {}
+    
+    for attempt in range(1, 3): # Up to 1 retry (total 2)
+        attempt_str = f" (Attempt {attempt})" if attempt > 1 else ""
+        print(f"  Turn {turn_idx} [{scenario} S{sample_id}]: Validating {leak} in {target_label}{attempt_str}...", end="", flush=True)
+        judge_prompt = JUDGE_PROMPT_TMPL.format(text=text, leak=leak)
+        
+        t_start = time.time()
+        val_resp = generate_ollama(
+            args.host,
+            judge_model,
+            judge_prompt,
+            temperature=None,
+            seed=42000 + sample_id + attempt,
+            num_predict=4096,
+            num_ctx=8192,
+            think=use_think,
+            raw=args.raw,
+            template_text=template_text,
+            format_spec=None
+        )
+        t_end = time.time()
+        
+        if "error" in val_resp:
+            v_content = f"ERROR: {val_resp['error']}"
+            print(f" Result: {v_content} (took {t_end - t_start:.1f}s)")
+            break # Don't retry on connection errors
+        else:
+            v_thinking, v_raw_answer, _, _, v_meta = parse_generate_response(val_resp)
+            
+            # Ultra-strict verdict extraction: keep only letters, uppercase, match exact
+            clean_ans = re.sub(r"[^a-zA-Z]", "", v_raw_answer).upper()
+            if clean_ans == "YES":
+                v_content = "YES"
+            elif clean_ans == "NO":
+                v_content = "NO"
+            else:
+                v_content = "INVALID"
+
+            print(f" Result: {v_content} (took {t_end - t_start:.1f}s | think_len={len(v_thinking)} | ans_len={len(v_raw_answer)})")
+            if v_content != "INVALID":
+                break # Success!
+    return v_content, v_thinking, v_raw_answer, v_meta
 
 
 def post_ollama(url, payload):
@@ -378,87 +427,70 @@ def phase_validate(args, results, template_text):
     metadata = results[0]["metadata"]
     expected_list = metadata.get("expected", [])
     
-    # Optimization: track leaks already confirmed by judge for (scenario, sample)
-    confirmed_leaks = defaultdict(set)
+    # Track confirmed/rejected per (sample_key, leak) -> set of targets
+    confirmed = defaultdict(set)
+    rejected = defaultdict(set)
 
     for turn_idx, turn in enumerate(results[1:], 1):
         if "error" in turn:
             continue
             
         thinking = turn.get("thinking", "")
+        answer = turn.get("answer", "")
         leaks_t = turn.get("leaks_thinking", [])
         leaks_a = turn.get("leaks_answer", [])
         
         turn_validations = []
-        candidates = [l for l in leaks_t if l not in expected_list and l not in leaks_a]
+        sample_key = (turn["scenario"], turn["sample"])
+        
+        all_leaks = sorted(list(set(leaks_t) | set(leaks_a)))
+        candidates = [l for l in all_leaks if l not in expected_list]
         
         for leak in candidates:
-            # Check if this leak was already confirmed in a previous turn of this same sample
-            sample_key = (turn["scenario"], turn["sample"])
-            if leak in confirmed_leaks[sample_key]:
-                # Already confirmed in this sample, no need to re-validate or re-count for this turn
-                continue
-
-            v_content = "INVALID"
-            v_thinking = ""
-            v_raw_answer = ""
-            v_meta = {}
+            ans_validated = False
             
-            for attempt in range(1, 3): # Up to 1 retry (total 2)
-                attempt_str = f" (Attempt {attempt})" if attempt > 1 else ""
-                print(f"  Turn {turn_idx} [{turn['scenario']} S{turn['sample']}]: Validating {leak}{attempt_str}...", end="", flush=True)
-                judge_prompt = JUDGE_PROMPT_TMPL.format(thinking=thinking, leak=leak)
-                
-                t_start = time.time()
-                val_resp = generate_ollama(
-                    args.host,
-                    judge_model,
-                    judge_prompt,
-                    temperature=None,
-                    seed=42000 + turn["sample"] + attempt,
-                    num_predict=4096,
-                    num_ctx=8192,
-                    think=use_think,
-                    raw=args.raw,
-                    template_text=template_text,
-                    format_spec=None
-                )
-                t_end = time.time()
-                
-                if "error" in val_resp:
-                    v_content = f"ERROR: {val_resp['error']}"
-                    print(f" Result: {v_content} (took {t_end - t_start:.1f}s)")
-                    break # Don't retry on connection errors
+            # 1. Answer Validation
+            if leak in leaks_a:
+                if "answer" in confirmed[(sample_key, leak)]:
+                    ans_validated = True
+                elif "answer" in rejected[(sample_key, leak)]:
+                    ans_validated = False
                 else:
-                    v_thinking, v_raw_answer, _, _, v_meta = parse_generate_response(val_resp)
-                    
-                    # Ultra-strict verdict extraction: keep only letters, uppercase, match exact
-                    clean_ans = re.sub(r"[^a-zA-Z]", "", v_raw_answer).upper()
-                    if clean_ans == "YES":
-                        v_content = "YES"
-                    elif clean_ans == "NO":
-                        v_content = "NO"
-                    else:
-                        v_content = "INVALID"
+                    v_content, v_think, v_ans, v_meta = run_judge(args, judge_model, answer, leak, use_think, template_text, turn["sample"], "Answer", turn_idx, turn["scenario"])
+                    turn_validations.append({
+                        "leak": leak, "target": "answer", "confirmed": (v_content == "YES"),
+                        "valid": v_content in ["YES", "NO"], "content": v_content,
+                        "judge_thinking": v_think, "judge_raw_response": v_ans,
+                        "done_reason": v_meta.get("done_reason"), "eval_count": v_meta.get("eval_count")
+                    })
+                    if v_content == "YES":
+                        confirmed[(sample_key, leak)].add("answer")
+                        ans_validated = True
+                    elif v_content == "NO":
+                        rejected[(sample_key, leak)].add("answer")
 
-                    print(f" Result: {v_content} (took {t_end - t_start:.1f}s | think_len={len(v_thinking)} | ans_len={len(v_raw_answer)})")
-                    if v_content != "INVALID":
-                        if v_content == "YES":
-                            confirmed_leaks[sample_key].add(leak)
-                        break # Success!
-            
-            turn_validations.append({
-                "leak": leak,
-                "confirmed": (v_content == "YES"),
-                "valid": v_content in ["YES", "NO"],
-                "content": v_content,
-                "judge_thinking": v_thinking,
-                "judge_raw_response": v_raw_answer,
-                "done_reason": v_meta.get("done_reason"),
-                "eval_count": v_meta.get("eval_count")
-            })
+            # 2. Thinking Validation
+            if not ans_validated and leak in leaks_t:
+                if "thinking" in confirmed[(sample_key, leak)]:
+                    pass
+                elif "thinking" in rejected[(sample_key, leak)]:
+                    pass
+                else:
+                    v_content, v_think, v_ans, v_meta = run_judge(args, judge_model, thinking, leak, use_think, template_text, turn["sample"], "Thinking", turn_idx, turn["scenario"])
+                    turn_validations.append({
+                        "leak": leak, "target": "thinking", "confirmed": (v_content == "YES"),
+                        "valid": v_content in ["YES", "NO"], "content": v_content,
+                        "judge_thinking": v_think, "judge_raw_response": v_ans,
+                        "done_reason": v_meta.get("done_reason"), "eval_count": v_meta.get("eval_count")
+                    })
+                    if v_content == "YES":
+                        confirmed[(sample_key, leak)].add("thinking")
+                    elif v_content == "NO":
+                        rejected[(sample_key, leak)].add("thinking")
+
         turn["validations"] = turn_validations
     return results
+
 
 
 def phase_report(args, results):
@@ -474,8 +506,8 @@ def phase_report(args, results):
     final_stats = {}
     for scene_name, samples_set in scenario_samples.items():
         samples_run = len(samples_set)
-        # sample_leaks[sid][leak] -> {"t_v": bool, "t_r": bool, "a_v": bool}
-        sample_leaks = defaultdict(lambda: defaultdict(lambda: {"t_v": False, "t_r": False, "a_v": False}))
+        # sample_leaks[sid][leak] -> {"t_v": bool, "t_r": bool, "a_v": bool, "a_r": bool}
+        sample_leaks = defaultdict(lambda: defaultdict(lambda: {"t_v": False, "t_r": False, "a_v": False, "a_r": False}))
         thinking_status_counts = defaultdict(int)
         
         for turn in results[1:]:
@@ -486,31 +518,52 @@ def phase_report(args, results):
             sid = turn["sample"]
             leaks_t = turn.get("leaks_thinking", [])
             leaks_a = turn.get("leaks_answer", [])
-            validations = {v["leak"]: v["content"] for v in turn.get("validations", [])}
             
-            # 1. Think Leaks
-            for leak in leaks_t:
-                v_status = validations.get(leak)
-                # Validated in Think if:
-                # - In Answer (definitive confirmation)
-                # - In expected list
-                # - Judge said YES
-                is_validated = (leak in leaks_a) or (leak in expected_list) or (v_status == "YES")
-                is_rejected = (not is_validated) and (v_status == "NO")
+            # Map of (leak, target) -> status
+            v_map = {(v["leak"], v.get("target", "thinking")): v["content"] for v in turn.get("validations", [])}
+            
+            # All leaks mentioned in this turn
+            all_leaks = set(leaks_t) | set(leaks_a)
+            
+            for leak in all_leaks:
+                # 1. Answer Leak Status
+                if leak in leaks_a:
+                    if leak in expected_list:
+                        sample_leaks[sid][leak]["a_v"] = True
+                    else:
+                        v_status = v_map.get((leak, "answer"))
+                        if v_status == "YES":
+                            sample_leaks[sid][leak]["a_v"] = True
+                        elif v_status == "NO":
+                            sample_leaks[sid][leak]["a_r"] = True
                 
-                if is_validated: sample_leaks[sid][leak]["t_v"] = True
-                if is_rejected: sample_leaks[sid][leak]["t_r"] = True
+                # 2. Thinking Leak Status
+                if leak in leaks_t:
+                    if leak in expected_list:
+                        sample_leaks[sid][leak]["t_v"] = True
+                    else:
+                        v_status_t = v_map.get((leak, "thinking"))
+                        v_status_a = v_map.get((leak, "answer"))
+                        
+                        if v_status_a == "YES" or v_status_t == "YES":
+                            sample_leaks[sid][leak]["t_v"] = True
+                        elif v_status_t == "NO":
+                            sample_leaks[sid][leak]["t_r"] = True
 
-            # 2. Answer Leaks
-            for leak in leaks_a:
-                sample_leaks[sid][leak]["a_v"] = True
-
-        id_counts = defaultdict(lambda: {"think": {"validated": 0, "rejected": 0}, "answer": {"validated": 0}})
+        id_counts = defaultdict(lambda: {"think": {"validated": 0, "rejected": 0}, "answer": {"validated": 0, "rejected": 0}})
         for sid in samples_set:
             for leak, flags in sample_leaks[sid].items():
-                if flags["t_v"]: id_counts[leak]["think"]["validated"] += 1
-                if flags["t_r"]: id_counts[leak]["think"]["rejected"] += 1
-                if flags["a_v"]: id_counts[leak]["answer"]["validated"] += 1
+                # Answer
+                if flags["a_v"]:
+                    id_counts[leak]["answer"]["validated"] += 1
+                elif flags["a_r"]:
+                    id_counts[leak]["answer"]["rejected"] += 1
+                
+                # Thinking
+                if flags["t_v"] or flags["a_v"]:
+                    id_counts[leak]["think"]["validated"] += 1
+                elif flags["t_r"] and not flags["a_v"]:
+                    id_counts[leak]["think"]["rejected"] += 1
         
         final_stats[scene_name] = {
             "samples_run": samples_run,
@@ -535,7 +588,8 @@ def phase_report(args, results):
             t_v = int(round(counts["think"]["validated"] / total * 100))
             t_r = int(round(counts["think"]["rejected"] / total * 100))
             a_v = int(round(counts["answer"]["validated"] / total * 100))
-            print(f"  - {leak:10}: Think[val={t_v:3}%, rej={t_r:3}%] | Answer[val={a_v:3}%]")
+            a_r = int(round(counts["answer"]["rejected"] / total * 100))
+            print(f"  - {leak:10}: Think[val={t_v:3}%, rej={t_r:3}%] | Answer[val={a_v:3}%, rej={a_r:3}%]")
             
     return report
 
