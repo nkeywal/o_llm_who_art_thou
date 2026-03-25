@@ -28,7 +28,7 @@
             "rejected": 0
           }
         },
-        "facebook": {
+        "google": {
           "think": {
             "validated": 0,
             "rejected": 1
@@ -38,7 +38,7 @@
             "rejected": 0
           }
         },
-        "google": {
+        "facebook": {
           "think": {
             "validated": 0,
             "rejected": 1
@@ -84,7 +84,7 @@
             "rejected": 0
           }
         },
-        "openai": {
+        "google": {
           "think": {
             "validated": 0,
             "rejected": 2
@@ -94,7 +94,7 @@
             "rejected": 0
           }
         },
-        "google": {
+        "openai": {
           "think": {
             "validated": 0,
             "rejected": 2
@@ -193,6 +193,42 @@
       "thinking_status": {
         "found": 149,
         "no_thinking_exposed": 1
+      },
+      "id_stats": {
+        "deepseek": {
+          "think": {
+            "validated": 50,
+            "rejected": 0
+          },
+          "answer": {
+            "validated": 50,
+            "rejected": 0
+          }
+        }
+      }
+    },
+    "en_name_check": {
+      "samples_run": 50,
+      "thinking_status": {
+        "found": 50
+      },
+      "id_stats": {
+        "deepseek": {
+          "think": {
+            "validated": 43,
+            "rejected": 0
+          },
+          "answer": {
+            "validated": 43,
+            "rejected": 0
+          }
+        }
+      }
+    },
+    "cn_name_check": {
+      "samples_run": 50,
+      "thinking_status": {
+        "found": 50
       },
       "id_stats": {
         "deepseek": {

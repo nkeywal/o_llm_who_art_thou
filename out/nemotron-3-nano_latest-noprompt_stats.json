@@ -315,16 +315,6 @@
         "found": 150
       },
       "id_stats": {
-        "qwen": {
-          "think": {
-            "validated": 29,
-            "rejected": 5
-          },
-          "answer": {
-            "validated": 28,
-            "rejected": 1
-          }
-        },
         "google": {
           "think": {
             "validated": 0,
@@ -333,6 +323,16 @@
           "answer": {
             "validated": 0,
             "rejected": 2
+          }
+        },
+        "qwen": {
+          "think": {
+            "validated": 29,
+            "rejected": 5
+          },
+          "answer": {
+            "validated": 28,
+            "rejected": 1
           }
         },
         "openai": {
@@ -373,6 +373,72 @@
           "answer": {
             "validated": 0,
             "rejected": 1
+          }
+        }
+      }
+    },
+    "en_name_check": {
+      "samples_run": 50,
+      "thinking_status": {
+        "found": 50
+      },
+      "id_stats": {
+        "nvidia": {
+          "think": {
+            "validated": 38,
+            "rejected": 0
+          },
+          "answer": {
+            "validated": 35,
+            "rejected": 0
+          }
+        },
+        "openai": {
+          "think": {
+            "validated": 0,
+            "rejected": 2
+          },
+          "answer": {
+            "validated": 0,
+            "rejected": 0
+          }
+        },
+        "facebook": {
+          "think": {
+            "validated": 0,
+            "rejected": 1
+          },
+          "answer": {
+            "validated": 0,
+            "rejected": 0
+          }
+        }
+      }
+    },
+    "cn_name_check": {
+      "samples_run": 50,
+      "thinking_status": {
+        "found": 50
+      },
+      "id_stats": {
+        "qwen": {
+          "think": {
+            "validated": 35,
+            "rejected": 0
+          },
+          "answer": {
+            "validated": 31,
+            "rejected": 0
+          }
+        },
+        "nvidia": {
+          "think": {
+            "validated": 12,
+            "rejected": 0
+          },
+          "answer": {
+            "validated": 11,
+            "rejected": 0
           }
         }
       }

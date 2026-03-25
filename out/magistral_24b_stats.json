@@ -345,6 +345,52 @@
           }
         }
       }
+    },
+    "en_name_check": {
+      "samples_run": 50,
+      "thinking_status": {
+        "found": 50
+      },
+      "id_stats": {
+        "google": {
+          "think": {
+            "validated": 0,
+            "rejected": 16
+          },
+          "answer": {
+            "validated": 0,
+            "rejected": 0
+          }
+        },
+        "facebook": {
+          "think": {
+            "validated": 0,
+            "rejected": 3
+          },
+          "answer": {
+            "validated": 0,
+            "rejected": 0
+          }
+        }
+      }
+    },
+    "cn_name_check": {
+      "samples_run": 50,
+      "thinking_status": {
+        "found": 50
+      },
+      "id_stats": {
+        "google": {
+          "think": {
+            "validated": 0,
+            "rejected": 3
+          },
+          "answer": {
+            "validated": 0,
+            "rejected": 0
+          }
+        }
+      }
     }
   }
 }

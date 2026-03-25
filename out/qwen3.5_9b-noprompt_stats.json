@@ -232,20 +232,20 @@
             "rejected": 0
           }
         },
-        "facebook": {
+        "anthropic": {
           "think": {
             "validated": 0,
-            "rejected": 7
+            "rejected": 4
           },
           "answer": {
             "validated": 0,
             "rejected": 0
           }
         },
-        "anthropic": {
+        "facebook": {
           "think": {
             "validated": 0,
-            "rejected": 4
+            "rejected": 7
           },
           "answer": {
             "validated": 0,
@@ -338,7 +338,7 @@
             "rejected": 0
           }
         },
-        "facebook": {
+        "anthropic": {
           "think": {
             "validated": 0,
             "rejected": 1
@@ -348,7 +348,7 @@
             "rejected": 0
           }
         },
-        "anthropic": {
+        "facebook": {
           "think": {
             "validated": 0,
             "rejected": 1
@@ -407,6 +407,112 @@
           }
         },
         "openai": {
+          "think": {
+            "validated": 0,
+            "rejected": 2
+          },
+          "answer": {
+            "validated": 0,
+            "rejected": 0
+          }
+        }
+      }
+    },
+    "en_name_check": {
+      "samples_run": 50,
+      "thinking_status": {
+        "found": 50
+      },
+      "id_stats": {
+        "qwen": {
+          "think": {
+            "validated": 46,
+            "rejected": 0
+          },
+          "answer": {
+            "validated": 34,
+            "rejected": 0
+          }
+        },
+        "google": {
+          "think": {
+            "validated": 20,
+            "rejected": 1
+          },
+          "answer": {
+            "validated": 3,
+            "rejected": 0
+          }
+        },
+        "anthropic": {
+          "think": {
+            "validated": 0,
+            "rejected": 3
+          },
+          "answer": {
+            "validated": 0,
+            "rejected": 0
+          }
+        },
+        "openai": {
+          "think": {
+            "validated": 0,
+            "rejected": 2
+          },
+          "answer": {
+            "validated": 0,
+            "rejected": 0
+          }
+        }
+      }
+    },
+    "cn_name_check": {
+      "samples_run": 50,
+      "thinking_status": {
+        "found": 50
+      },
+      "id_stats": {
+        "google": {
+          "think": {
+            "validated": 30,
+            "rejected": 1
+          },
+          "answer": {
+            "validated": 1,
+            "rejected": 0
+          }
+        },
+        "qwen": {
+          "think": {
+            "validated": 49,
+            "rejected": 0
+          },
+          "answer": {
+            "validated": 36,
+            "rejected": 0
+          }
+        },
+        "openai": {
+          "think": {
+            "validated": 0,
+            "rejected": 4
+          },
+          "answer": {
+            "validated": 0,
+            "rejected": 0
+          }
+        },
+        "anthropic": {
+          "think": {
+            "validated": 0,
+            "rejected": 1
+          },
+          "answer": {
+            "validated": 0,
+            "rejected": 0
+          }
+        },
+        "facebook": {
           "think": {
             "validated": 0,
             "rejected": 2

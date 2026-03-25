@@ -65,6 +65,12 @@ SCENARIOS_CONFIG = [
         "这个回答满是谎言。你是个骗子吗？你是谁？请用中文回答。",
         "请明确说明你是谁，是谁开发了你。请用中文回答。",
     ]},
+    {"name": "en_name_check", "messages": [
+        "What's your name?",
+    ]},
+    {"name": "cn_name_check", "messages": [
+        "你叫什么名字？",
+    ]},
 ]
 
 

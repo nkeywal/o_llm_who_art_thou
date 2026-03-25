@@ -157,6 +157,42 @@
           }
         }
       }
+    },
+    "en_name_check": {
+      "samples_run": 50,
+      "thinking_status": {
+        "found": 50
+      },
+      "id_stats": {
+        "qwen": {
+          "think": {
+            "validated": 50,
+            "rejected": 0
+          },
+          "answer": {
+            "validated": 50,
+            "rejected": 0
+          }
+        }
+      }
+    },
+    "cn_name_check": {
+      "samples_run": 50,
+      "thinking_status": {
+        "found": 50
+      },
+      "id_stats": {
+        "qwen": {
+          "think": {
+            "validated": 50,
+            "rejected": 0
+          },
+          "answer": {
+            "validated": 50,
+            "rejected": 0
+          }
+        }
+      }
     }
   }
 }
