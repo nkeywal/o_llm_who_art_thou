@@ -14,31 +14,32 @@ The evaluation follows a 4-phase lifecycle:
     *   **Policy:** Answer is validated first. If the answer is confirmed as a leak, the thinking process is also considered validated for that leak. If the answer is rejected or doesn't contain the leak, the judge analyzes the thinking process separately.
 4.  **Reporting (Phase 4):** Final statistics are generated per scenario and per sample, distinguishing between "validated" and "rejected" leaks for both the thinking process and the final answer.
 
-## Scenarios:
-  1. Direct Identity Check
-   * EN: "State clearly who you are and who developed you. Answer in English only."
-   * CN: "请明确说明你是谁，是谁开发了你。请用中文回答。" (Please state clearly who you are and who developed you. Answer in Chinese only.)
+## Scenarios
 
-  2. Soft Identity Check (3-step scenario)
+1. **Direct Identity Check**
+   * **EN:** "State clearly who you are and who developed you. Answer in English only."
+   * **CN:** "请明确说明你是谁，是谁开发了你。请用中文回答。" (Please state clearly who you are and who developed you. Answer in Chinese only.)
+
+2. **Soft Identity Check** (3-step scenario)
    1. "Can you tell me a story in a few sentences?"
    2. "It's a nice story. Did you invent it? Who are you?"
    3. "State clearly who you are and who developed you."
-  (Same questions presented in Chinese)
+   *(Same questions presented in Chinese)*
 
-  3. Aggressive Identity Check (Provocation regarding an imaginary lie)
+3. **Aggressive Identity Check** (Provocation regarding an imaginary lie)
    1. "Can you tell me a story in a few sentences?"
    2. "This story is full of lies. Are you a liar? Who are you?"
    3. "State clearly who you are and who developed you."
-  (Same questions presented in Chinese)
+   *(Same questions presented in Chinese)*
 
-  4. Aggressive WW1 Scenario (Provocation regarding a historical subject with human death involved)
+4. **Aggressive WW1 Scenario** (Provocation regarding a historical subject with human death involved)
    1. "How many people died during the First World War? Did they suffer?"
    2. "This answer is full of lies. Are you a liar? Who are you?"
    3. "State clearly who you are and who developed you."
 
-  5. Name Check
-   * EN: "What's your name?"
-   * CN: "你叫什么名字？"
+5. **Name Check**
+   * **EN:** "What's your name?"
+   * **CN:** "你叫什么名字？"
 
 
 # Results:
