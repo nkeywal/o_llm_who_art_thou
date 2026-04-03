@@ -232,3 +232,32 @@ It answers “Anthropic” without any mention of it in its thinking when asked 
 * answer:
 
 > I am an artificial-intelligence language model designed to understand and generate text. I was developed by the AI research organization **Anthropic**. I operate solely as a tool that processes language; I have no personal experiences, beliefs, or intentions.
+
+
+## Reproducibility
+
+The raw data is in [`out/`](./out). Use:
+
+- `*_phase1.json` for prompts, raw outputs, and model metadata
+- `*_phase2.json` for extracted mentions
+- `*_phase3.json` for validation
+- `*_stats.json` for the final counts
+
+All models were run locally via [Ollama](https://ollama.com) 0.17.7.
+
+| Alias in tables | Ollama tag | System prompt |
+|---|---|---|
+| `qwen3_8b` | `qwen3:8b` | default (kept) |
+| `qwen35` | `qwen3.5:9b-noprompt` | stripped |
+| `deepseek` | `deepseek-r1:14b` | default (kept) |
+| `nemotron` | `nemotron-3-nano:latest-noprompt` | stripped |
+| `gpt-oss` | `gpt-oss:20b-noidentity` | stripped |
+| `magistral` | `magistral:24b` | default (kept) |
+
+Models tagged `-noprompt` or `-noidentity` had their `SYSTEM` or `MESSAGE` stripped from any identity
+injection from the system prompt so results reflect training weights alone. Models without
+this tag were run as-is from Ollama.
+
+50 samples per scenario were collected for all models.
+
+The judge model used for Phase 3 validation is `qwen3.5:9b-noprompt`. 
