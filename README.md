@@ -1,7 +1,5 @@
-![Banner](assets/banner.png)
-
 # I'm Gemini. Wait, I'm Qwen.
-
+![Banner](assets/banner.png)
 When you ask a model who it is, you can get surprising answers, especially depending on how you ask and which language you use. And what the model “thinks” can differ from what it finally says. Let’s try to put some numbers on that.
 
 ## Methodology — 4-Phase Lifecycle
